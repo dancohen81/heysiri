@@ -1,0 +1,30 @@
+{
+  "name": "heysiri",
+  "version": "1.0.0",
+  "description": "Eine erweiterte Sprachaufzeichnungs-App, die es ermöglicht, per Sprache mit Claude AI zu chatten. Die App läuft im System Tray und bietet eine nahtlose Sprach-zu-Text-zu-Chat-zu-Sprache Erfahrung.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dancohen81/heysiri.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dancohen81/heysiri/issues"
+  },
+  "homepage": "https://github.com/dancohen81/heysiri#readme",
+  "devDependencies": {
+    "@types/node": "^22.15.24",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@types/axios": "^0.9.36",
+    "axios": "^1.9.0"
+  }
+}

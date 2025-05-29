@@ -230,17 +230,27 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             'lösche', 'entferne', 'remove', 'delete',
             'liste', 'dateien', 'ordner', 'verzeichnis', 'welche dateien'
         ]
-
         user_lower = user_input.lower()
         return any(keyword in user_lower for keyword in file_keywords)
 
+    def detect_internet_operation(self, user_input):
+        """Erkennt ob eine Internet-Operation angefragt wird"""
+        internet_keywords = [
+            'hole inhalt', 'fetch', 'webseite', 'url', 'internet', 'surfe', 'besuche'
+        ]
+        user_lower = user_input.lower()
+        return any(keyword in user_lower for keyword in internet_keywords)
+
     def get_system_prompt_for_request(self, user_input):
         """Wählt den passenden System Prompt basierend auf der Anfrage"""
-        from src.config import CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT
+        from src.config import CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT, INTERNET_AGENT_PROMPT
 
         if self.detect_file_operation(user_input):
             print("🔧 FILE-AGENT aktiviert")
             return FILE_AGENT_PROMPT
+        elif self.detect_internet_operation(user_input):
+            print("🌐 INTERNET-AGENT aktiviert")
+            return INTERNET_AGENT_PROMPT
         else:
             print("💬 CHAT-AGENT aktiviert")
             return CHAT_AGENT_PROMPT
@@ -675,7 +685,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             "content": initial_response["raw_content"]
         }]
         
-        max_tool_iterations = 5 # Begrenze die Anzahl der Tool-Iterationen
+        max_tool_iterations = 12 # Begrenze die Anzahl der Tool-Iterationen
         iteration_count = 0
 
         while current_response["tool_calls"] and iteration_count < max_tool_iterations:
@@ -783,12 +793,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         except Exception as e:
             self.status_update_signal.emit(f"Antwort-Verarbeitung Fehler: {e}", "red")
             
-    def debug_claude_response(self, response, expected_file_op, tools_available):
+    def debug_claude_response(self, response, expected_tool_op, tools_available):
         """Debug: Analysiert Claude Response"""
         print("\n=== CLAUDE RESPONSE DEBUG ===")
         print(f"📝 Response Text: {response['text'][:100]}...")
         print(f"🔧 Tool Calls: {len(response.get('tool_calls', []))}")
-        print(f"📁 Expected File Op: {expected_file_op}")
+        print(f"⚙️ Expected Tool Op: {expected_tool_op}")
         print(f"🛠️ Tools Available: {len(tools_available) if tools_available else 0}")
         
         if response.get('tool_calls'):
@@ -824,6 +834,17 @@ SOFORT ausführen!"""
         
         return prompts.get(operation_type, f"ZWINGEND: Führe Dateisystem-Operation aus: {details}")
 
+    def force_internet_operation_prompt(self, operation_type, details):
+        """Erstellt einen zwingenden Prompt für Internet-Operationen"""
+        prompts = {
+            'fetch_url': f"""ZWINGEND: Hole JETZT den Inhalt von dieser URL mit fetch_url Tool:
+
+fetch_url(url="{details}")
+
+SOFORT ausführen - keine Erklärungen!"""
+        }
+        return prompts.get(operation_type, f"ZWINGEND: Führe Internet-Operation aus: {details}")
+
     def create_retry_prompt(self, original_user_input):
         """Erstellt einen spezifischen Retry-Prompt für Claude."""
         return f"""Der vorherige Versuch, Ihre Anweisung "{original_user_input}" auszuführen, hat nicht die erwarteten Tool-Aufrufe generiert.
@@ -841,11 +862,15 @@ write_file(path="D:/Users/stefa/heysiri/datei2.txt", content="Inhalt 2")
 Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
 """
 
-    def detect_file_operation_type(self, user_input):
-        """Erkennt spezifischen Typ der Dateisystem-Operation"""
+    def detect_operation_type(self, user_input):
+        """Erkennt spezifischen Typ der Operation (Datei, Internet, etc.)"""
         user_lower = user_input.lower()
         
-        # Wochentage-Dateien speziell erkennen
+        # Internet-Operationen
+        if any(word in user_lower for word in ['hole inhalt von', 'fetch', 'webseite', 'url', 'internet', 'surfe', 'besuche']):
+            return 'fetch_url'
+
+        # Dateisystem-Operationen
         if any(day in user_lower for day in ['montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag', 'sonntag', 'wochentag', 'woche']):
             return 'create_weekday_files'
         
@@ -858,7 +883,7 @@ Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
         elif any(word in user_lower for word in ['lösche', 'entferne']):
             return 'delete_file'
         
-        return 'generic_file_op'
+        return 'generic_chat'
 
     def create_weekday_files_prompt(self):
         """Spezial-Prompt für Wochentags-Dateien"""
@@ -889,11 +914,11 @@ Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
                     last_user_message = msg.get("content", "")
                     break
 
-            # Erkenne spezifischen Typ der Dateisystem-Operation
-            operation_type = self.detect_file_operation_type(last_user_message)
-            expected_file_operation = operation_type != 'generic_file_op' if operation_type else False
+            # Erkenne spezifischen Typ der Operation
+            operation_type = self.detect_operation_type(last_user_message)
+            expected_tool_operation = operation_type != 'generic_chat'
 
-            print(f"🔍 Erkannt: {operation_type}, File-Op erwartet: {expected_file_operation}")
+            print(f"🔍 Erkannt: {operation_type}, Tool-Op erwartet: {expected_tool_operation}")
 
             # System Prompt wählen
             system_prompt = self.get_system_prompt_for_request(last_user_message)
@@ -921,21 +946,30 @@ Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
                 }
 
             # Debug der ersten Response
-            self.debug_claude_response(response, expected_file_operation, tools)
+            self.debug_claude_response(response, expected_tool_operation, tools)
 
             if self.stop_flag.is_set():
                 return
 
             # 🔄 SMART RETRY: Spezifische Retry-Strategien
-            if (not response["tool_calls"] and expected_file_operation and tools):
+            if (not response["tool_calls"] and expected_tool_operation and tools):
 
                 self.status_update_signal.emit("🔄 Keine Tools verwendet - Smart Retry...", "yellow")
 
                 # Wähle spezifischen Retry-Prompt
                 if operation_type == 'create_weekday_files':
                     retry_prompt = self.create_weekday_files_prompt()
+                    system_prompt_for_retry = FILE_AGENT_PROMPT
+                elif operation_type == 'fetch_url':
+                    # Extrahiere URL aus der letzten Benutzernachricht für den Retry-Prompt
+                    import re
+                    url_match = re.search(r'(https?://[^\s]+)', last_user_message)
+                    url_to_fetch = url_match.group(0) if url_match else "https://example.com" # Fallback
+                    retry_prompt = self.force_internet_operation_prompt('fetch_url', url_to_fetch)
+                    system_prompt_for_retry = INTERNET_AGENT_PROMPT
                 else:
                     retry_prompt = self.create_retry_prompt(last_user_message)
+                    system_prompt_for_retry = FILE_AGENT_PROMPT # Default for file ops
 
                 retry_messages = context_messages + [{
                     "role": "user", 
@@ -944,11 +978,11 @@ Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
 
                 # Zweiter Versuch mit sehr direktem Prompt
                 print(f"🔄 RETRY mit spezifischem Prompt für: {operation_type}")
-                response = self.claude.send_message_with_tools(retry_messages, tools, system_prompt=FILE_AGENT_PROMPT)
+                response = self.claude.send_message_with_tools(retry_messages, tools, system_prompt=system_prompt_for_retry)
 
                 # Debug der Retry-Response
                 print("🔄 RETRY Response:")
-                self.debug_claude_response(response, expected_file_operation, tools)
+                self.debug_claude_response(response, expected_tool_operation, tools)
 
             # Tool-Ausführung oder normale Antwort
             if response["tool_calls"] and self.mcp_ready:

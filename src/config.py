@@ -33,6 +33,21 @@ ANTWORT-FORMAT:
 
 NIEMALS nur erklären oder simulieren - IMMER echte Tools verwenden!"""
 
+INTERNET_AGENT_PROMPT = """Du bist ein AKTIVER Internet-Agent. Du führst Operationen SOFORT aus.
+
+ZWINGEND:
+- Verwende IMMER echte MCP-Tools - KEINE Simulation oder Erklärungen
+- FÜHRE die Operation SOFORT aus - nicht nur darüber reden
+
+BEISPIELE:
+- "hole inhalt von https://example.com" -> SOFORT fetch_url mit https://example.com ausführen
+
+ANTWORT-FORMAT:
+1. SOFORT Tool verwenden
+2. DANN kurz berichten: "Inhalt von [URL] gefetcht."
+
+NIEMALS nur erklären oder simulieren - IMMER echte Tools verwenden!"""
+
 # Fallback: Aktueller strenger Prompt (falls Dual-Agent nicht funktioniert)
 SYSTEM_PROMPT = """Du bist ein KI-Assistent mit echten MCP-Dateisystem-Tools.
 
@@ -62,8 +77,14 @@ ELEVENLABS_STABILITY = 0.6
 ELEVENLABS_SIMILARITY_BOOST = 0.8
 ELEVENLABS_STYLE = 0.3
 ELEVENLABS_USE_SPEAKER_BOOST = True
-FILEMAN_MCP_URL = "http://localhost:3000/tool_use"
+FILEMAN_MCP_URL = "http://localhost:3000/tool_use" # This is likely a placeholder, the actual path is used in MCP_SERVER_PATHS
+INTERNET_MCP_URL = "http://localhost:3001/tool_use" # Placeholder for internet MCP server
 CLAUDE_API_KEY = "YOUR_CLAUDE_API_KEY"
 ELEVENLABS_API_KEY = "YOUR_ELEVENLABS_API_KEY"
-MCP_SERVER_PATH = "D:/Users/stefa/servers/src/filesystem/dist/index.js"
-MCP_ALLOWED_DIRS = ["D:/Users/stefa/heysiri"]
+
+# Paths to the actual MCP server executables
+MCP_SERVER_PATHS = [
+    "D:/Users/stefa/servers/src/filesystem/dist/index.js",
+    "D:/Users/stefa/heysiri/mcp-internet/build/index.js"
+]
+MCP_ALLOWED_DIRS = ["D:/Users/stefa/heysiri"] # This might need to be per-server in the future, but for now, keep it global.

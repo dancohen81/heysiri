@@ -31,3 +31,6 @@ temp_aufnahme.wav
 .env
 voice-chat-project/
 chat_history.json
+
+# Node modules
+node_modules/

@@ -40,7 +40,8 @@ class MCPClient:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=0,
-                cwd=os.path.dirname(self.server_path)
+                cwd=os.path.dirname(self.server_path),
+                encoding='utf-8' # Specify UTF-8 encoding for stdout/stderr
             )
             
             # Prüfe ob Prozess erfolgreich gestartet
@@ -259,47 +260,71 @@ class MCPClient:
         print("🔌 MCP Client gestoppt")
 
 
+from src.config import MCP_SERVER_PATHS, MCP_ALLOWED_DIRS
+
 class MCPManager:
-    """Manager für MCP Client mit einfacher API"""
+    """Manager für mehrere MCP Clients mit einfacher API"""
     
     def __init__(self):
-        self.client = None
+        self.clients: Dict[str, MCPClient] = {} # Store clients by a unique identifier (e.g., server path)
         self.ready = False
         
-    async def setup(self, server_path: str = None, allowed_dirs: list = None):
-        """Initialisiert MCP Client mit Standard-Werten"""
-        if server_path is None:
-            server_path = "D:/Users/stefa/servers/src/filesystem/dist/index.js"
-        if allowed_dirs is None:
-            allowed_dirs = ["D:/Users/stefa/heysiri"]
-            
-        try:
-            self.client = MCPClient(server_path, allowed_dirs)
-            self.ready = await self.client.start()
-            return self.ready
-        except Exception as e:
-            print(f"❌ MCP Setup fehlgeschlagen: {e}")
-            self.ready = False
-            return False
+    async def setup(self):
+        """Initialisiert alle MCP Clients basierend auf MCP_SERVER_PATHS"""
+        self.clients = {} # Reset clients
+        all_ready = True
+        
+        for server_path in MCP_SERVER_PATHS:
+            try:
+                # Use the base name of the server path as a simple identifier for now
+                server_id = os.path.basename(os.path.dirname(server_path)) 
+                client = MCPClient(server_path, MCP_ALLOWED_DIRS) # Pass global allowed_dirs for now
+                
+                print(f"🔧 Versuche, MCP Client für {server_id} zu starten...")
+                client_started = await client.start()
+                
+                if client_started:
+                    self.clients[server_id] = client
+                    print(f"✅ MCP Client für {server_id} erfolgreich gestartet.")
+                else:
+                    print(f"❌ MCP Client für {server_id} konnte nicht gestartet werden.")
+                    all_ready = False
+            except Exception as e:
+                print(f"❌ Fehler beim Starten des MCP Clients für {server_path}: {e}")
+                all_ready = False
+                
+        self.ready = all_ready and bool(self.clients) # Ensure at least one client is ready
+        return self.ready
     
     def get_tools_for_claude(self) -> list:
-        """Gibt Tools für Claude zurück"""
-        if self.ready and self.client:
-            return self.client.get_tools_for_claude()
-        return []
+        """Aggregiert Tools von allen aktiven MCP Clients für Claude"""
+        all_claude_tools = []
+        for client in self.clients.values():
+            if client.is_ready():
+                all_claude_tools.extend(client.get_tools_for_claude())
+        return all_claude_tools
     
     async def execute_tool(self, tool_name: str, arguments: dict):
-        """Führt Tool aus"""
-        if not self.ready or not self.client:
-            return {"error": "MCP nicht bereit"}
-        return await self.client.execute_tool_call(tool_name, arguments)
+        """Führt Tool über den passenden MCP Client aus"""
+        if not self.ready:
+            return {"error": "MCP Manager nicht bereit"}
+            
+        for client in self.clients.values():
+            if tool_name in client.tools:
+                print(f"DEBUG: Führe Tool '{tool_name}' über Client '{os.path.basename(os.path.dirname(client.server_path))}' aus.")
+                return await client.execute_tool_call(tool_name, arguments)
+        
+        return {"error": f"Tool '{tool_name}' nicht in einem der verbundenen MCP Server gefunden."}
     
     def is_ready(self) -> bool:
-        """Prüft MCP Status"""
-        return self.ready and self.client and self.client.is_ready()
+        """Prüft ob alle MCP Clients bereit sind"""
+        if not self.clients:
+            return False
+        return all(client.is_ready() for client in self.clients.values())
     
     def stop(self):
-        """Stoppt MCP"""
-        if self.client:
-            self.client.stop()
+        """Stoppt alle MCP Clients"""
+        for client in self.clients.values():
+            client.stop()
+        self.clients = {}
         self.ready = False
