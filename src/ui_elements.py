@@ -192,6 +192,8 @@ class StatusWindow(QtWidgets.QWidget):
     def setup_keyboard(self):
         """Richtet Tastatur-Events ein"""
         self.f3_pressed = False
+        self.press_start_time = None # To track how long the F3 key is pressed
+        self.feedback_given = False # To ensure feedback is given only once at 0.5s
         # self.grabKeyboard() # Removed: No longer needed with event filter
 
     def eventFilter(self, obj, event):
@@ -211,7 +213,8 @@ class StatusWindow(QtWidgets.QWidget):
             "green": "🟢",
             "red": "🔴", 
             "yellow": "🟡",
-            "blue": "🔵"
+            "blue": "🔵",
+            "orange": "🟠" # New color for feedback
         }
         
         if color in color_map:
@@ -268,6 +271,7 @@ class StatusWindow(QtWidgets.QWidget):
     send_message_requested = QtCore.pyqtSignal(str)
     stop_requested = QtCore.pyqtSignal() # New signal for stopping processes
     pause_audio_requested = QtCore.pyqtSignal() # New signal for pausing/resuming audio
+    record_feedback_signal = QtCore.pyqtSignal(str, str) # New signal for record feedback
 
     def enable_send_button(self):
         self.send_button.setEnabled(True)
@@ -304,12 +308,15 @@ class StatusWindow(QtWidgets.QWidget):
         """Tastendruck-Event (Hauptfenster)"""
         if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
             self.f3_pressed = True
+            self.press_start_time = QtCore.QDateTime.currentMSecsSinceEpoch() # Store start time in ms
+            self.feedback_given = False
         super().keyPressEvent(event) # Pass other key events to base class
 
     def keyReleaseEvent(self, event):
         """Tasten-Loslassen-Event (Hauptfenster)"""
         if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
             self.f3_pressed = False
+            # The duration check and recording start will be handled in AudioRecorder.check_keyboard
         super().keyReleaseEvent(event) # Pass other key events to base class
 
     def set_input_text(self, text):

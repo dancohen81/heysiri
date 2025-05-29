@@ -1,0 +1,93 @@
+AUDIO-DSP INTEGRATION FÜR CHAT-APP
+===============================
+
+ÜBERBLICK
+---------
+Die bestehende Chat-App soll um DSP-Effekte (Digital Signal Processing) erweitert werden, die nach der Eleven Labs Audiogenerierung angewendet werden. Die Steuerung erfolgt durch spezielle Befehle in den KI-Antworten selbst.
+
+WORKFLOW
+--------
+1. User-Input → Whisper (Speech-to-Text)
+2. Text → KI-Antwort mit DSP-Befehlen
+3. KI-Antwort → Eleven Labs (Text-to-Speech)
+4. Eleven Labs Audio → DSP-Effekte → Final Audio
+
+DSP-BEFEHLE IN KI-ANTWORTEN
+---------------------------
+Ähnlich wie bei den existierenden Geschwindigkeitsbefehlen (!schnell:, !langsam:) werden DSP-Effekte durch Befehle am Anfang der KI-Antwort gesteuert:
+
+!echo: - Fügt Echo-Effekt hinzu
+!hall: - Fügt Hall-Effekt hinzu
+!pitch+: - Erhöht die Tonhöhe
+!pitch-: - Senkt die Tonhöhe
+!filter: - Wendet einen Filter an
+
+Beispiele:
+"!hall: Dies klingt nun, als wäre ich in einer Kathedrale"
+"!echo: Echo... echo... echo..."
+"!pitch+: *mit höherer Stimme* Hallo!"
+
+TECHNISCHE IMPLEMENTIERUNG
+-------------------------
+1. Parser für DSP-Befehle
+   - Erkennt Befehle am Anfang der KI-Antwort
+   - Extrahiert Parameter (falls vorhanden)
+   - Entfernt Befehle aus dem Text für Eleven Labs
+
+2. DSP-Effekt Module
+   - Echo: Verzögerung und Feedback
+   - Hall: Reverb-Algorithmus
+   - Pitch-Shifting: Tonhöhenveränderung
+   - Filter: Verschiedene Filtertypen
+
+3. Audio-Processing Pipeline
+   - Empfängt Audio von Eleven Labs
+   - Wendet gewählte Effekte an
+   - Gibt modifiziertes Audio aus
+
+INTEGRATION
+-----------
+- Erweitere den bestehenden Message-Handler um DSP-Befehl-Erkennung
+- Füge DSP-Processing-Pipeline nach Eleven Labs ein
+- Stelle sicher, dass Befehle vor der Eleven Labs Verarbeitung entfernt werden
+
+WICHTIGE HINWEISE
+----------------
+- Effekte sollten subtil sein und die Verständlichkeit nicht beeinträchtigen
+- Mehrere Effekte können kombiniert werden: "!hall: !echo: Hallo"
+- Performance ist kritisch - Effekte müssen echtzeitfähig sein
+- Fehlerbehandlung für ungültige Kombinationen implementieren
+
+BEISPIEL-CODE-STRUKTUR
+---------------------
+// Befehlserkennung
+function parseDSPCommands(aiResponse) {
+    const commands = [];
+    // Extrahiere alle DSP-Befehle am Anfang
+    // Entferne Befehle aus Text
+    return { commands, cleanText };
+}
+
+// DSP-Verarbeitung
+async function processDSPEffects(audioBuffer, commands) {
+    for (const cmd of commands) {
+        switch(cmd) {
+            case 'echo':
+                audioBuffer = await applyEcho(audioBuffer);
+                break;
+            case 'hall':
+                audioBuffer = await applyReverb(audioBuffer);
+                break;
+            // ... weitere Effekte
+        }
+    }
+    return audioBuffer;
+}
+
+NÄCHSTE SCHRITTE
+---------------
+1. Implementiere Befehlserkennung
+2. Entwickle grundlegende DSP-Effekte
+3. Teste verschiedene Effektkombinationen
+4. Optimiere Performance
+5. Dokumentiere Befehlssyntax für KI-Training

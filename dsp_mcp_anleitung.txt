@@ -1,0 +1,104 @@
+DSP MCP ANLEITUNG FÜR AUDIO-NACHBEARBEITUNG
+=========================================
+
+INTEGRATION IN BESTEHENDE APP
+----------------------------
+WICHTIG: Diese DSP-Komponente wird in die bestehende Chat-App im Workspace integriert!
+Der aktuelle Workflow ist:
+Mikrofon → Whisper (Text) → Eleven Labs (Audio) → [HIER KOMMT DER NEUE DSP-TEIL] → Audio-Ausgabe
+
+Du musst also NICHT eine komplette neue App entwickeln, sondern nur den DSP-Teil, der das fertige Audio von Eleven Labs weiter verarbeitet!
+
+HAUPTKOMPONENTEN DES DSP-MCP
+---------------------------
+1. Audio-Input-Handler
+   - Empfängt das Audio von Eleven Labs
+   - Konvertiert es in ein verarbeitbares Format
+
+2. Kontext-Analyzer
+   - Analysiert den ursprünglichen Text/die Intention
+   - Bestimmt passende Audioeffekte basierend auf Kontext
+
+3. DSP-Effekt-Prozessor
+   - Implementiert verschiedene Audioeffekte
+   - Verarbeitet das Audio in Echtzeit
+   - Wendet ausgewählte Effekte an
+
+4. Audio-Output-Handler
+   - Bereitet das verarbeitete Audio für die Wiedergabe vor
+   - Stellt sicher, dass die Audioqualität erhalten bleibt
+
+IMPLEMENTIERUNG DER DSP-FUNKTIONEN
+--------------------------------
+Folgende Effekte sollten implementiert werden:
+
+1. Pitch-Shifting
+   - Tonhöhenänderung
+   - Nützlich für emotionale Anpassungen
+
+2. Reverb/Hall
+   - Verschiedene Raumgrößen
+   - Für atmosphärische Effekte
+
+3. Echo
+   - Einstellbare Verzögerung und Feedback
+   - Für besondere Effekte
+
+4. Filter
+   - Hochpass/Tiefpass/Bandpass
+   - EQ für Klangoptimierung
+
+CODE-STRUKTUR (Beispiel in C/C++)
+--------------------------------
+```c
+typedef struct {
+    float* buffer;
+    int length;
+    float sampleRate;
+} AudioData;
+
+// Hauptklasse für DSP-Verarbeitung
+class AudioProcessor {
+    public:
+        void processAudio(AudioData* input);
+        void setEffect(EffectType type, float param);
+    private:
+        void applyPitchShift();
+        void applyReverb();
+        void applyEcho();
+        void applyFilter();
+};
+```
+
+OPTIMIERUNG UND STABILITÄT
+-------------------------
+1. Buffer-Management
+   - Ausreichend große Puffer für Verzögerungseffekte
+   - Vermeidung von Überläufen
+
+2. Latenz-Optimierung
+   - Effiziente Algorithmen verwenden
+   - Puffergröße optimieren
+
+3. Fehlerbehandlung
+   - Robuste Fehlerprüfung
+   - Graceful Degradation bei Überlastung
+
+KONTEXTABHÄNGIGE EFFEKTE
+-----------------------
+Beispiele für kontextbasierte Effektauswahl:
+
+- Fröhlicher Text → Leichter Pitch-Shift nach oben
+- Geheimnisvoller Text → Subtiler Hall-Effekt
+- Dramatischer Text → Echo mit moderatem Feedback
+- Entspannter Text → Sanfte Filterung für weicheren Klang
+
+WICHTIGE HINWEISE
+----------------
+1. Immer mit dem Original-Audio von Eleven Labs arbeiten
+2. Effekte subtil einsetzen - weniger ist oft mehr
+3. Auf Audioqualität und Verständlichkeit achten
+4. Effekte sollten den Kontext unterstützen, nicht übertönen
+5. Performance im Auge behalten - Echtzeitverarbeitung ist wichtig
+
+Diese Anleitung dient als Grundlage für die Integration des DSP-MCP in die bestehende Chat-App. Passe die Implementierung an die spezifischen Anforderungen und verfügbare Hardware an.
