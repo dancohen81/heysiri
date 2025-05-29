@@ -90,7 +90,7 @@ set ELEVENLABS_API_KEY=dein_elevenlabs_key_hier
 
 ```cmd
 call venv\Scripts\activate.bat
-python voice_chat_app.py
+python src/main.py
 ```
 
 ### Einrichtung des Fileman MCP Servers
@@ -227,7 +227,19 @@ pip install pygame
 
 ```
 voice-chat-app/
-├── voice_chat_app.py      # Hauptanwendung
+├── src/                   # Haupt-Source-Code
+│   ├── api_clients.py
+│   ├── app_logic.py
+│   ├── audio_recorder.py
+│   ├── chat_history.py
+│   ├── config.py
+│   ├── debug_tool.py
+│   ├── main.py            # Hauptanwendung
+│   ├── mcp_client.py
+│   ├── session_manager.py
+│   ├── ui_elements.py
+│   ├── utils.py
+│   └── voice_chat_app.py
 ├── requirements.txt       # Python-Abhängigkeiten  
 ├── setup.bat             # Windows Setup-Skript
 ├── .env.example          # API Key Vorlage

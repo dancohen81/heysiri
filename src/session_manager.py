@@ -2,7 +2,7 @@ import os
 import datetime
 from PyQt5 import QtWidgets, QtCore
 
-from chat_history import ChatHistory
+from src.chat_history import ChatHistory
 
 class ChatSessionManager:
     def __init__(self, chat_history: ChatHistory, claude_api, window, status_update_signal, chat_message_signal):

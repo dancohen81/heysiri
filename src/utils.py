@@ -14,7 +14,8 @@ def setup_autostart():
         shell = Dispatch('WScript.Shell')
         shortcut = shell.CreateShortCut(shortcut_path)
         shortcut.TargetPath = sys.executable
-        shortcut.Arguments = f'"{os.path.abspath(__file__)}"'
+        # Point to the main application entry point in the src directory
+        shortcut.Arguments = f'"{os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))}"'
         shortcut.WorkingDirectory = os.path.dirname(os.path.abspath(__file__))
         shortcut.save()
         return True

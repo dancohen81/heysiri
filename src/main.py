@@ -3,8 +3,8 @@ import os
 from PyQt5 import QtWidgets
 from dotenv import load_dotenv
 
-from app_logic import VoiceChatApp
-from utils import check_api_keys
+from src.app_logic import VoiceChatApp
+from src.utils import check_api_keys
 
 def main():
     """Hauptfunktion"""

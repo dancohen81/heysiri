@@ -11,14 +11,14 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 import sys
 import requests
 
-from config import SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL
-from chat_history import ChatHistory
-from api_clients import ClaudeAPI, ElevenLabsTTS
-from ui_elements import StatusWindow
-from utils import setup_autostart, play_audio_file
-from session_manager import ChatSessionManager
-from audio_recorder import AudioRecorder
-from mcp_client import MCPManager
+from src.config import SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL
+from src.chat_history import ChatHistory
+from src.api_clients import ClaudeAPI, ElevenLabsTTS
+from src.ui_elements import StatusWindow
+from src.utils import setup_autostart, play_audio_file
+from src.session_manager import ChatSessionManager
+from src.audio_recorder import AudioRecorder
+from src.mcp_client import MCPManager
 
 class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     """Hauptanwendung mit System Tray Integration"""
@@ -236,7 +236,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
     def get_system_prompt_for_request(self, user_input):
         """Wählt den passenden System Prompt basierend auf der Anfrage"""
-        from config import CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT
+        from src.config import CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT
 
         if self.detect_file_operation(user_input):
             print("🔧 FILE-AGENT aktiviert")
@@ -292,7 +292,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
     def edit_elevenlabs_settings(self):
         """Ermöglicht dem Benutzer, die ElevenLabs TTS-Einstellungen zu bearbeiten und zu speichern."""
-        from config import ELEVENLABS_VOICE_ID, ELEVENLABS_STABILITY, ELEVENLABS_SIMILARITY_BOOST, ELEVENLABS_STYLE, ELEVENLABS_USE_SPEAKER_BOOST
+        from src.config import ELEVENLABS_VOICE_ID, ELEVENLABS_STABILITY, ELEVENLABS_SIMILARITY_BOOST, ELEVENLABS_STYLE, ELEVENLABS_USE_SPEAKER_BOOST
         
         self.window.releaseKeyboard()
 
@@ -356,7 +356,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             new_use_speaker_boost = use_speaker_boost_checkbox.isChecked()
 
             try:
-                with open("config.py", 'r', encoding='utf-8') as f:
+                with open("src/config.py", 'r', encoding='utf-8') as f:
                     lines = f.readlines()
 
                 updated_lines = []
@@ -374,7 +374,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                     else:
                         updated_lines.append(line)
                 
-                with open("config.py", 'w', encoding='utf-8') as f:
+                with open("src/config.py", 'w', encoding='utf-8') as f:
                     f.writelines(updated_lines)
                 
                 self.status_update_signal.emit("ElevenLabs Einstellungen gespeichert. Bitte App neu starten, damit Änderungen wirksam werden.", "green")
@@ -385,7 +385,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
     def edit_system_prompt(self):
         """Ermöglicht dem Benutzer, den System Prompt zu bearbeiten und zu speichern."""
-        from config import SYSTEM_PROMPT
+        from src.config import SYSTEM_PROMPT
         
         self.window.releaseKeyboard()
 
@@ -418,7 +418,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         if ok == QtWidgets.QDialog.Accepted:
             try:
-                with open("config.py", 'r', encoding='utf-8') as f:
+                with open("src/config.py", 'r', encoding='utf-8') as f:
                     lines = f.readlines()
 
                 updated_lines = []
@@ -433,7 +433,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 if not found:
                     updated_lines.append(f'\nSYSTEM_PROMPT = "{new_prompt}"\n')
 
-                with open("config.py", 'w', encoding='utf-8') as f:
+                with open("src/config.py", 'w', encoding='utf-8') as f:
                     f.writelines(updated_lines)
                 
                 self.status_update_signal.emit("System Prompt gespeichert. Bitte App neu starten, damit Änderungen wirksam werden.", "green")

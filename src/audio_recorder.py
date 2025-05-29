@@ -7,7 +7,7 @@ import winsound
 import threading
 from PyQt5 import QtCore, QtWidgets # Import QtWidgets for QInputDialog, QFileDialog, QMessageBox
 
-from config import SAMPLERATE, AUDIO_FILENAME
+from src.config import SAMPLERATE, AUDIO_FILENAME
 
 class AudioRecorder(QtCore.QObject):
     """Handles audio recording, transcription, and related UI updates."""

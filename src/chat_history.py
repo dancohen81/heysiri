@@ -1,7 +1,7 @@
 import datetime
 import os
 import json
-from config import CHAT_HISTORY_FILE
+from src.config import CHAT_HISTORY_FILE
 
 class ChatHistory:
     """Verwaltet den lokalen Chat-Verlauf"""
