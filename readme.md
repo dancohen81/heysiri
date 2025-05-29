@@ -11,6 +11,8 @@ Eine erweiterte Sprachaufzeichnungs-App, die es ermöglicht, per Sprache mit Cla
 - **🖥️ System Tray:** Läuft diskret im Hintergrund
 - **🎯 Kontextbewusst:** Claude "erinnert" sich an vorherige Nachrichten
 - **⚡ Autostart:** Optional automatischer Start mit Windows
+- **📁 Dateisystem-Agent:** Führt Dateisystemoperationen aus (z.B. Dateien erstellen, lesen, auflisten)
+- **🌐 Internet-Agent:** Kann Webinhalte von URLs abrufen (z.B. Webseiteninhalte fetchen)
 
 ## 📋 Workflow
 
@@ -28,6 +30,7 @@ Eine erweiterte Sprachaufzeichnungs-App, die es ermöglicht, per Sprache mit Cla
 - Windows 10/11 (für System Tray Integration)
 - Mikrofon
 - Internetverbindung
+- Node.js und npm (oder yarn) für MCP Server
 
 ### Schritt 1: Repository klonen/herunterladen
 
@@ -46,6 +49,7 @@ Das Setup-Skript erstellt automatisch:
 - Virtuelle Python-Umgebung (`venv/`)
 - Installation aller Abhängigkeiten
 - Überprüfung der Installation
+- **Startet und initialisiert die benötigten MCP Server (Dateisystem und Internet) automatisch.**
 
 ### Schritt 3: API Keys einrichten
 
@@ -92,53 +96,6 @@ set ELEVENLABS_API_KEY=dein_elevenlabs_key_hier
 call venv\Scripts\activate.bat
 python src/main.py
 ```
-
-### Einrichtung des Fileman MCP Servers
-
-Die Voice Chat App kann mit einem lokalen Fileman MCP Server interagieren, um Dateien zu speichern. So richten Sie ihn ein:
-
-#### Voraussetzungen
-
--   **Node.js und npm (oder yarn):** Stellen Sie sicher, dass Node.js und ein Paketmanager (npm oder yarn) auf Ihrem System installiert sind. Sie können diese von der offiziellen Node.js-Website herunterladen.
-
-#### Schritt 1: Fileman Server klonen/herunterladen
-
-Der Fileman MCP Server ist ein separates Projekt. Sie müssen es klonen oder herunterladen:
-
-```bash
-git clone https://github.com/modelcontextprotocol/servers.git
-cd servers/src/filesystem
-```
-*(Hinweis: Der genaue Pfad kann je nach Ihrem Setup variieren. Stellen Sie sicher, dass Sie in das Verzeichnis wechseln, das die `package.json` des Fileman Servers enthält.)*
-
-#### Schritt 2: Abhängigkeiten installieren
-
-Navigieren Sie im Terminal in das `fileman` Server-Verzeichnis (z.B. `servers/src/fileman`) und installieren Sie die Abhängigkeiten:
-
-```bash
-npm install
-# oder
-yarn install
-```
-
-#### Schritt 3: Fileman Server bauen und starten
-
-Bauen Sie den Fileman Server und starten Sie ihn. Er wird standardmäßig auf Port `3000` laufen.
-
-```bash
-npm run build
-# oder
-yarn build
-```
-
-Danach starten Sie den Server:
-
-```bash
-node dist/index.js "D:/Users/stefa/heysiri"
-```
-*(Hinweis: Der Fileman Server benötigt mindestens ein Verzeichnis, in dem er Operationen ausführen darf. Hier wird das Hauptverzeichnis der Voice Chat App als erlaubtes Verzeichnis angegeben. Sie können auch andere Pfade hinzufügen, z.B. `node dist/index.js "D:/Users/stefa/heysiri" "C:/Users/stefa/Dokumente"`)*
-
-Lassen Sie dieses Terminalfenster geöffnet, da der Server im Hintergrund laufen muss, damit die Voice Chat App mit ihm kommunizieren kann. Die App erwartet, dass der Server unter `http://localhost:3000/tool_use` erreichbar ist (konfiguriert in `config.py`).
 
 ## 🎯 Verwendung
 
@@ -240,6 +197,7 @@ voice-chat-app/
 │   ├── ui_elements.py
 │   ├── utils.py
 │   └── voice_chat_app.py
+├── mcp-internet/          # Internet MCP Server
 ├── requirements.txt       # Python-Abhängigkeiten  
 ├── setup.bat             # Windows Setup-Skript
 ├── .env.example          # API Key Vorlage
