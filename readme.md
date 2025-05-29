@@ -121,14 +121,20 @@ npm install
 yarn install
 ```
 
-#### Schritt 3: Fileman Server starten
+#### Schritt 3: Fileman Server bauen und starten
 
-Starten Sie den Fileman Server. Er wird standardmäßig auf Port `3000` laufen.
+Bauen Sie den Fileman Server und starten Sie ihn. Er wird standardmäßig auf Port `3000` laufen.
 
 ```bash
-npm start
+npm run build
 # oder
-yarn start
+yarn build
+```
+
+Danach starten Sie den Server:
+
+```bash
+node dist/index.js
 ```
 
 Lassen Sie dieses Terminalfenster geöffnet, da der Server im Hintergrund laufen muss, damit die Voice Chat App mit ihm kommunizieren kann. Die App erwartet, dass der Server unter `http://localhost:3000/tool_use` erreichbar ist (konfiguriert in `config.py`).
