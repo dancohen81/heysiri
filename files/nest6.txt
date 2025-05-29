@@ -1,0 +1,1 @@
+funktioniert mit einem Credit-System, wobei jede Text-to-Speech Umwandlung Credits kostet. Wenn diese aufgebraucht sind, werden weitere Anfragen mit diesem 401-Fehler abgelehnt. Was

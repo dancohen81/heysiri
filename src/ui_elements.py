@@ -193,10 +193,9 @@ class StatusWindow(QtWidgets.QWidget):
             if event.key() == QtCore.Qt.Key_Space:
                 # Allow space to be entered into the input field
                 return False
-            elif event.key() == QtCore.Qt.Key_F3:
-                # Do not set f3_pressed when F3 is pressed in the input field
-                self.f3_pressed = False
-                return False
+            # Allow F3 key events to propagate to the main window's keyPressEvent
+            # This ensures that F3 can be used for recording even when the input field has focus.
+            # The f3_pressed flag will be handled by the main window's keyPressEvent/keyReleaseEvent.
         return super().eventFilter(obj, event) # For other events, pass to base class
 
     def set_status(self, text, color="white"):

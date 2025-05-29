@@ -650,7 +650,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
             # Prüfe ob Claude Tools verwenden möchte
             if response["tool_calls"] and self.mcp_ready:
-                await self._execute_tool_calls(response, context_messages, tools)
+                await self._execute_tool_calls(response, context_messages, tools, system_prompt)
             else:
                 # Normale Antwort ohne Tool-Verwendung
                 if response["text"]:
@@ -667,15 +667,26 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 # HINWEIS: Falls ClaudeAPI keinen system_prompt Parameter hat, 
 # dann müssen wir api_clients.py auch anpassen!
 
-    async def _execute_tool_calls(self, initial_response, context_messages, tools):
-        """Führt Tool-Aufrufe aus und holt finale Antwort"""
-        try:
-            self.status_update_signal.emit("🔧 Führe Tool-Aktionen aus...", "blue")
-            
-            # Tool-Aufrufe ausführen
+    async def _execute_tool_calls(self, initial_response, context_messages, tools, system_prompt):
+        """Führt Tool-Aufrufe aus und holt finale Antwort in einer Schleife"""
+        current_response = initial_response
+        current_messages = context_messages + [{
+            "role": "assistant", 
+            "content": initial_response["raw_content"]
+        }]
+        
+        max_tool_iterations = 5 # Begrenze die Anzahl der Tool-Iterationen
+        iteration_count = 0
+
+        while current_response["tool_calls"] and iteration_count < max_tool_iterations:
+            iteration_count += 1
+            self.status_update_signal.emit(f"🔧 Führe Tool-Aktionen aus (Iteration {iteration_count})...", "blue")
+            print(f"DEBUG: Starte Tool-Iteration {iteration_count}")
+
             tool_results = []
-            for tool_call in initial_response["tool_calls"]:
+            for tool_call in current_response["tool_calls"]:
                 if self.stop_flag.is_set():
+                    print("DEBUG: Stop-Flag gesetzt, beende Tool-Ausführung.")
                     return
                     
                 tool_name = tool_call["name"]
@@ -683,6 +694,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 tool_id = tool_call["id"]
                 
                 self.status_update_signal.emit(f"🛠️ Verwende Tool: {tool_name}", "blue")
+                print(f"DEBUG: Ausführen von Tool: {tool_name} mit Argumenten: {tool_args}")
                 
                 # Tool über MCP ausführen
                 result = await self.mcp_manager.execute_tool(tool_name, tool_args)
@@ -697,29 +709,47 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                     }]
                 }
                 tool_results.append(tool_result)
+                print(f"DEBUG: Tool-Ergebnis für {tool_name}: {result}")
 
             if self.stop_flag.is_set():
+                print("DEBUG: Stop-Flag gesetzt nach Tool-Ausführung, beende.")
                 return
 
-            # Finale Claude-Anfrage mit Tool-Ergebnissen
-            self.status_update_signal.emit("🤖 Claude verarbeitet Ergebnisse...", "blue")
+            # Füge Tool-Ergebnisse zu den Nachrichten hinzu
+            current_messages.extend(tool_results)
             
-            # Vollständige Nachrichten-Kette aufbauen
-            full_messages = context_messages + [{
-                "role": "assistant", 
-                "content": initial_response["raw_content"]
-            }] + tool_results
+            self.status_update_signal.emit("🤖 Claude verarbeitet Ergebnisse und sucht nach weiteren Tools...", "blue")
+            print("DEBUG: Sende Tool-Ergebnisse zurück an Claude für nächste Runde.")
             
-            final_response = self.claude.send_message_with_tools(full_messages, tools)
+            # Nächste Claude-Anfrage mit Tool-Ergebnissen
+            current_response = self.claude.send_message_with_tools(current_messages, tools, system_prompt=system_prompt)
             
-            # Finale Antwort verarbeiten
-            if final_response["text"]:
-                self._handle_claude_response(final_response["text"])
-            else:
-                self.status_update_signal.emit("✅ Tool-Aktionen abgeschlossen", "green")
+            # Debug der aktuellen Claude-Antwort
+            self.debug_claude_response(current_response, True, tools) # True, da wir weitere Tools erwarten könnten
 
-        except Exception as e:
-            self.status_update_signal.emit(f"Tool-Ausführung Fehler: {e}", "red")
+            # Füge die neue Assistenten-Antwort (mit möglichen neuen Tool-Aufrufen) zu den Nachrichten hinzu
+            if current_response["raw_content"]:
+                current_messages.append({
+                    "role": "assistant",
+                    "content": current_response["raw_content"]
+                })
+            
+            if not current_response["tool_calls"]:
+                print("DEBUG: Claude hat keine weiteren Tool-Aufrufe generiert. Beende Schleife.")
+                break # Keine weiteren Tool-Aufrufe, Schleife beenden
+
+        # Finale Antwort verarbeiten (Text oder Abschlussmeldung)
+        if current_response["text"]:
+            self._handle_claude_response(current_response["text"])
+        else:
+            self.status_update_signal.emit("✅ Alle Tool-Aktionen abgeschlossen.", "green")
+            print("DEBUG: Alle Tool-Aktionen abgeschlossen, keine Textantwort.")
+
+        if iteration_count >= max_tool_iterations:
+            self.status_update_signal.emit("⚠️ Maximale Tool-Iterationen erreicht. Möglicherweise nicht alle Aufgaben erledigt.", "yellow")
+            print("DEBUG: Maximale Tool-Iterationen erreicht.")
+
+        print("DEBUG: _execute_tool_calls beendet.")
 
     def _handle_claude_response(self, claude_text):
         """Verarbeitet Claude-Antwort (Text-Ausgabe + TTS)"""
@@ -753,26 +783,24 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         except Exception as e:
             self.status_update_signal.emit(f"Antwort-Verarbeitung Fehler: {e}", "red")
             
-    # ERWEITERE app_logic.py um diese Debug-Methoden:
+    def debug_claude_response(self, response, expected_file_op, tools_available):
+        """Debug: Analysiert Claude Response"""
+        print("\n=== CLAUDE RESPONSE DEBUG ===")
+        print(f"📝 Response Text: {response['text'][:100]}...")
+        print(f"🔧 Tool Calls: {len(response.get('tool_calls', []))}")
+        print(f"📁 Expected File Op: {expected_file_op}")
+        print(f"🛠️ Tools Available: {len(tools_available) if tools_available else 0}")
+        
+        if response.get('tool_calls'):
+            for i, tool_call in enumerate(response['tool_calls']):
+                print(f"  Tool {i+1}: {tool_call.get('name', 'Unknown')}")
+        
+        print("============================\n")
 
-def debug_claude_response(self, response, expected_file_op, tools_available):
-    """Debug: Analysiert Claude Response"""
-    print("\n=== CLAUDE RESPONSE DEBUG ===")
-    print(f"📝 Response Text: {response['text'][:100]}...")
-    print(f"🔧 Tool Calls: {len(response.get('tool_calls', []))}")
-    print(f"📁 Expected File Op: {expected_file_op}")
-    print(f"🛠️ Tools Available: {len(tools_available) if tools_available else 0}")
-    
-    if response.get('tool_calls'):
-        for i, tool_call in enumerate(response['tool_calls']):
-            print(f"  Tool {i+1}: {tool_call.get('name', 'Unknown')}")
-    
-    print("============================\n")
-
-def force_file_operation_prompt(self, operation_type, details):
-    """Erstellt einen zwingenden Prompt für Dateisystem-Operationen"""
-    prompts = {
-        'create_files': f"""ZWINGEND: Erstelle JETZT diese Dateien mit write_file Tool:
+    def force_file_operation_prompt(self, operation_type, details):
+        """Erstellt einen zwingenden Prompt für Dateisystem-Operationen"""
+        prompts = {
+            'create_files': f"""ZWINGEND: Erstelle JETZT diese Dateien mit write_file Tool:
 
 {details}
 
@@ -780,46 +808,61 @@ Verwende für jede Datei:
 write_file(path="D:/Users/stefa/heysiri/[DATEINAME]", content="[INHALT]")
 
 SOFORT ausführen - keine Erklärungen!""",
-        
-        'list_files': """ZWINGEND: Verwende JETZT list_directory Tool:
+            
+            'list_files': """ZWINGEND: Verwende JETZT list_directory Tool:
 
 list_directory(path="D:/Users/stefa/heysiri")
 
 SOFORT ausführen!""",
-        
-        'read_file': f"""ZWINGEND: Verwende JETZT read_file Tool:
+            
+            'read_file': f"""ZWINGEND: Verwende JETZT read_file Tool:
 
 read_file(path="D:/Users/stefa/heysiri/{details}")
 
 SOFORT ausführen!"""
-    }
-    
-    return prompts.get(operation_type, f"ZWINGEND: Führe Dateisystem-Operation aus: {details}")
+        }
+        
+        return prompts.get(operation_type, f"ZWINGEND: Führe Dateisystem-Operation aus: {details}")
 
-# ERWEITERE detect_file_operation() für spezifischere Erkennung:
+    def create_retry_prompt(self, original_user_input):
+        """Erstellt einen spezifischen Retry-Prompt für Claude."""
+        return f"""Der vorherige Versuch, Ihre Anweisung "{original_user_input}" auszuführen, hat nicht die erwarteten Tool-Aufrufe generiert.
 
-def detect_file_operation_type(self, user_input):
-    """Erkennt spezifischen Typ der Dateisystem-Operation"""
-    user_lower = user_input.lower()
-    
-    # Wochentage-Dateien speziell erkennen
-    if any(day in user_lower for day in ['montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag', 'sonntag', 'wochentag', 'woche']):
-        return 'create_weekday_files'
-    
-    if any(word in user_lower for word in ['erstelle', 'schreibe', 'mache', 'lege an']):
-        return 'create_files'
-    elif any(word in user_lower for word in ['liste', 'zeige dateien', 'welche dateien']):
-        return 'list_files'  
-    elif any(word in user_lower for word in ['lese', 'inhalt', 'was steht']):
-        return 'read_file'
-    elif any(word in user_lower for word in ['lösche', 'entferne']):
-        return 'delete_file'
-    
-    return 'generic_file_op'
+ZWINGEND: Generieren Sie JETZT die notwendigen Tool-Aufrufe, um die Aufgabe vollständig abzuschließen.
+- Verwenden Sie IMMER vollständige Pfade: D:/Users/stefa/heysiri/DATEINAME
+- Verwenden Sie IMMER echte MCP-Tools - KEINE Simulation oder Erklärungen
+- FÜHREN Sie die Operation SOFORT aus - nicht nur darüber reden
 
-def create_weekday_files_prompt(self):
-    """Spezial-Prompt für Wochentags-Dateien"""
-    return """ZWINGEND: Erstelle JETZT 7 Dateien für jeden Wochentag:
+Wenn die Aufgabe die Erstellung mehrerer Dateien beinhaltet, generieren Sie ALLE write_file-Aufrufe in EINER EINZIGEN Antwort.
+Beispiel:
+write_file(path="D:/Users/stefa/heysiri/datei1.txt", content="Inhalt 1")
+write_file(path="D:/Users/stefa/heysiri/datei2.txt", content="Inhalt 2")
+
+Fahren Sie mit der Aufgabe fort, bis sie vollständig abgeschlossen ist.
+"""
+
+    def detect_file_operation_type(self, user_input):
+        """Erkennt spezifischen Typ der Dateisystem-Operation"""
+        user_lower = user_input.lower()
+        
+        # Wochentage-Dateien speziell erkennen
+        if any(day in user_lower for day in ['montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag', 'sonntag', 'wochentag', 'woche']):
+            return 'create_weekday_files'
+        
+        if any(word in user_lower for word in ['erstelle', 'schreibe', 'mache', 'lege an']):
+            return 'create_files'
+        elif any(word in user_lower for word in ['liste', 'zeige dateien', 'welche dateien']):
+            return 'list_files'  
+        elif any(word in user_lower for word in ['lese', 'inhalt', 'was steht']):
+            return 'read_file'
+        elif any(word in user_lower for word in ['lösche', 'entferne']):
+            return 'delete_file'
+        
+        return 'generic_file_op'
+
+    def create_weekday_files_prompt(self):
+        """Spezial-Prompt für Wochentags-Dateien"""
+        return """ZWINGEND: Erstelle JETZT 7 Dateien für jeden Wochentag:
 
     write_file(path="D:/Users/stefa/heysiri/montag.txt", content="Montag")
     write_file(path="D:/Users/stefa/heysiri/dienstag.txt", content="Dienstag")  
@@ -830,8 +873,6 @@ def create_weekday_files_prompt(self):
     write_file(path="D:/Users/stefa/heysiri/sonntag.txt", content="Sonntag")
 
     ALLE 7 Tools SOFORT ausführen - keine Erklärungen!"""
-
-    # ERWEITERE _handle_claude_with_mcp() um bessere Spezial-Behandlung:
 
     async def _handle_claude_with_mcp(self):
         """Async Handler mit verbesserter Self-Correction"""
