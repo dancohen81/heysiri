@@ -27,7 +27,7 @@ class AudioRecorder(QtCore.QObject):
 
     def check_keyboard(self):
         """Prüft Tastatur-Status (Alt-Taste)"""
-        if self.window.alt_pressed:
+        if self.window.f3_pressed:
             if not self.is_recording:
                 self.start_recording()
         else:

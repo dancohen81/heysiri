@@ -156,7 +156,7 @@ Lassen Sie dieses Terminalfenster geöffnet, da der Server im Hintergrund laufen
 - **Minimieren Button:** Versteckt das Fenster
 
 ### Tastenkombinationen
-- **Leertaste halten:** Aufnahme starten/stoppen
+- **F3 drücken:** Aufnahme starten/stoppen
 - **ESC:** Fenster schließen (App läuft im Tray weiter)
 
 ## 🔧 Konfiguration

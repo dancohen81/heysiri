@@ -129,7 +129,7 @@ class StatusWindow(QtWidgets.QWidget):
 
     def setup_keyboard(self):
         """Richtet Tastatur-Events ein"""
-        self.alt_pressed = False # Changed from space_pressed
+        self.f3_pressed = False
         # self.grabKeyboard() # Removed: No longer needed with event filter
 
     def eventFilter(self, obj, event):
@@ -138,11 +138,10 @@ class StatusWindow(QtWidgets.QWidget):
             if event.key() == QtCore.Qt.Key_Space:
                 # Allow space to be entered into the input field
                 return False
-            elif event.key() == QtCore.Qt.Key_Alt:
-                # Do not set alt_pressed when Alt is pressed in the input field
-                # This ensures Alt+Space combinations don't trigger recording while typing
-                self.alt_pressed = False
-                return False # Allow Alt to pass through if needed by other handlers
+            elif event.key() == QtCore.Qt.Key_F3:
+                # Do not set f3_pressed when F3 is pressed in the input field
+                self.f3_pressed = False
+                return False
         return super().eventFilter(obj, event) # For other events, pass to base class
 
     def set_status(self, text, color="white"):
@@ -224,14 +223,14 @@ class StatusWindow(QtWidgets.QWidget):
 
     def keyPressEvent(self, event):
         """Tastendruck-Event (Hauptfenster)"""
-        if event.key() == QtCore.Qt.Key_Alt and not event.isAutoRepeat():
-            self.alt_pressed = True
+        if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
+            self.f3_pressed = True
         super().keyPressEvent(event) # Pass other key events to base class
 
     def keyReleaseEvent(self, event):
         """Tasten-Loslassen-Event (Hauptfenster)"""
-        if event.key() == QtCore.Qt.Key_Alt and not event.isAutoRepeat():
-            self.alt_pressed = False
+        if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
+            self.f3_pressed = False
         super().keyReleaseEvent(event) # Pass other key events to base class
 
     def set_input_text(self, text):
