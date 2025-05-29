@@ -107,7 +107,7 @@ Der Fileman MCP Server ist ein separates Projekt. Sie müssen es klonen oder her
 
 ```bash
 git clone https://github.com/modelcontextprotocol/servers.git
-cd servers/src/fileman
+cd servers/src/filesystem
 ```
 *(Hinweis: Der genaue Pfad kann je nach Ihrem Setup variieren. Stellen Sie sicher, dass Sie in das Verzeichnis wechseln, das die `package.json` des Fileman Servers enthält.)*
 
