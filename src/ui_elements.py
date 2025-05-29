@@ -118,9 +118,9 @@ class StatusWindow(QtWidgets.QWidget):
         
         layout.addLayout(status_layout)
         
-        # Chat-Verlauf
-        chat_label = QtWidgets.QLabel("Chat-Verlauf:")
-        layout.addWidget(chat_label)
+        # Chat-Verlauf Titel
+        self.chat_title_label = QtWidgets.QLabel("Chat-Verlauf:") # Make it an instance variable
+        layout.addWidget(self.chat_title_label)
         
         self.chat_display = QtWidgets.QTextEdit()
         # Removed setMaximumHeight to allow chat display to expand with window
@@ -135,16 +135,23 @@ class StatusWindow(QtWidgets.QWidget):
 
         # Send and Stop buttons
         send_stop_button_layout = QtWidgets.QHBoxLayout()
-        self.send_button = QtWidgets.QPushButton("Senden")
-        self.send_button.clicked.connect(self._on_send_button_clicked)
-        send_stop_button_layout.addWidget(self.send_button)
-
+        
         self.stop_button = QtWidgets.QPushButton("🛑 Stopp")
         self.stop_button.clicked.connect(self.stop_requested)
         self.stop_button.setEnabled(False) # Initially disabled
         send_stop_button_layout.addWidget(self.stop_button)
+
+        self.pause_button = QtWidgets.QPushButton("⏯️ Pause/Resume")
+        self.pause_button.clicked.connect(self.pause_audio_requested)
+        self.pause_button.setEnabled(False) # Initially disabled
+        send_stop_button_layout.addWidget(self.pause_button)
+
+        send_stop_button_layout.addStretch(1) # Push the send button to the right
+
+        self.send_button = QtWidgets.QPushButton("Senden")
+        self.send_button.clicked.connect(self._on_send_button_clicked)
+        send_stop_button_layout.addWidget(self.send_button)
         
-        send_stop_button_layout.addStretch(1) # Push buttons to the right
         layout.addLayout(send_stop_button_layout)
         
         # Other Buttons
@@ -246,6 +253,11 @@ class StatusWindow(QtWidgets.QWidget):
     def clear_chat_display(self):
         """Löscht Chat-Anzeige"""
         self.chat_display.clear()
+        self.set_chat_title("Chat-Verlauf:") # Reset title when chat is cleared
+
+    def set_chat_title(self, title: str):
+        """Setzt den Titel des Chat-Verlaufs"""
+        self.chat_title_label.setText(f"Chat-Verlauf: <b>{title}</b>")
 
     # Add new signals to StatusWindow
     new_session_requested = QtCore.pyqtSignal()
@@ -255,6 +267,7 @@ class StatusWindow(QtWidgets.QWidget):
     clear_chat_requested = QtCore.pyqtSignal()
     send_message_requested = QtCore.pyqtSignal(str)
     stop_requested = QtCore.pyqtSignal() # New signal for stopping processes
+    pause_audio_requested = QtCore.pyqtSignal() # New signal for pausing/resuming audio
 
     def enable_send_button(self):
         self.send_button.setEnabled(True)
@@ -269,6 +282,12 @@ class StatusWindow(QtWidgets.QWidget):
 
     def disable_stop_button(self):
         self.stop_button.setEnabled(False)
+
+    def enable_pause_button(self):
+        self.pause_button.setEnabled(True)
+
+    def disable_pause_button(self):
+        self.pause_button.setEnabled(False)
 
     def _on_clear_button_clicked(self):
         """Handler for clear button click, emits clear_chat_requested signal."""

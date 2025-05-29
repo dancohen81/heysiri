@@ -6,69 +6,44 @@ AUDIO_FILENAME = "temp_aufnahme.wav"
 CHAT_HISTORY_FILE = "chat_history.json"
 TTS_OUTPUT_FILE = "claude_response.mp3"
 
-# DUAL-AGENT SYSTEM PROMPTS
-CHAT_AGENT_PROMPT = """Du bist ein freundlicher KI-Assistent für normale Gespräche auf Deutsch.
+import json
+import os
 
-Führe normale Unterhaltungen und beantworte Fragen hilfsreich und gesprächig.
+# Pfad zur prompts.json Datei
+PROMPTS_FILE = os.path.join(os.path.dirname(__file__), '..', 'config', 'prompts.json')
 
-Falls der Benutzer Dateisystem-Operationen erwähnt, führe sie durch und erkläre was du gemacht hast."""
+# Prompts laden
+try:
+    with open(PROMPTS_FILE, 'r', encoding='utf-8') as f:
+        _prompts = json.load(f)
+except FileNotFoundError:
+    _prompts = {}
+    print(f"⚠️ Prompts file not found: {PROMPTS_FILE}. Using empty prompts.")
+except json.JSONDecodeError:
+    _prompts = {}
+    print(f"❌ Error decoding prompts from {PROMPTS_FILE}. Using empty prompts.")
 
-FILE_AGENT_PROMPT = """Du bist ein AKTIVER Dateisystem-Agent. Du führst Operationen SOFORT aus.
+CHAT_AGENT_PROMPT = _prompts.get("CHAT_AGENT_PROMPT", "")
+FILE_AGENT_PROMPT = _prompts.get("FILE_AGENT_PROMPT", "")
+INTERNET_AGENT_PROMPT = _prompts.get("INTERNET_AGENT_PROMPT", "")
+SYSTEM_PROMPT = _prompts.get("SYSTEM_PROMPT", "")
 
-ZWINGEND:
-- Verwende IMMER vollständige Pfade: D:/Users/stefa/heysiri/DATEINAME
-- Verwende IMMER echte MCP-Tools - KEINE Simulation oder Erklärungen
-- FÜHRE die Operation SOFORT aus - nicht nur darüber reden
-
-ARBEITSVERZEICHNIS: D:/Users/stefa/heysiri
-
-BEISPIELE:
-- "erstelle test.txt" -> SOFORT write_file mit D:/Users/stefa/heysiri/test.txt ausführen
-- "liste dateien" -> SOFORT list_directory ausführen  
-- "lese config.py" -> SOFORT read_file ausführen
-
-ANTWORT-FORMAT:
-1. SOFORT Tool verwenden
-2. DANN kurz berichten: "OK [Dateiname] erstellt" oder " [X] Dateien gefunden"
-
-NIEMALS nur erklären oder simulieren - IMMER echte Tools verwenden!"""
-
-INTERNET_AGENT_PROMPT = """Du bist ein AKTIVER Internet-Agent. Du führst Operationen SOFORT aus.
-
-ZWINGEND:
-- Verwende IMMER echte MCP-Tools - KEINE Simulation oder Erklärungen
-- FÜHRE die Operation SOFORT aus - nicht nur darüber reden
-
-BEISPIELE:
-- "hole inhalt von https://example.com" -> SOFORT fetch_url mit https://example.com ausführen
-
-ANTWORT-FORMAT:
-1. SOFORT Tool verwenden
-2. DANN kurz berichten: "Inhalt von [URL] gefetcht."
-
-NIEMALS nur erklären oder simulieren - IMMER echte Tools verwenden!"""
-
-# Fallback: Aktueller strenger Prompt (falls Dual-Agent nicht funktioniert)
-SYSTEM_PROMPT = """Du bist ein KI-Assistent mit echten MCP-Dateisystem-Tools.
-
-VERBOTEN:
-- Jegliche JSON-Ausgabe wie {"action": ...} oder {"cmd": ...}
-- Simulation von Tool-Aufrufen
-- Reden ohne echte Tool-Verwendung
-- Erfinden von Dateiinhalten
-
-NUR ERLAUBT:
-- Echte MCP-Tool-Aufrufe (write_file, read_file, list_directory)
-- Kurze Antworten nach Tool-Verwendung
-
-Bei Dateianfragen:
-1. IMMER vollstaendigen Pfad verwenden: D:/Users/stefa/heysiri/DATEINAME
-2. ERST echtes Tool verwenden
-3. DANN kurz antworten
-
-Arbeitsverzeichnis: D:/Users/stefa/heysiri
-
-KEINE SIMULATION - NUR ECHTE TOOLS!"""
+# Funktion zum Speichern der Prompts
+def save_prompts(new_prompts: dict):
+    global CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT, INTERNET_AGENT_PROMPT, SYSTEM_PROMPT
+    _prompts.update(new_prompts)
+    try:
+        with open(PROMPTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_prompts, f, indent=4, ensure_ascii=False)
+        CHAT_AGENT_PROMPT = _prompts.get("CHAT_AGENT_PROMPT", "")
+        FILE_AGENT_PROMPT = _prompts.get("FILE_AGENT_PROMPT", "")
+        INTERNET_AGENT_PROMPT = _prompts.get("INTERNET_AGENT_PROMPT", "")
+        SYSTEM_PROMPT = _prompts.get("SYSTEM_PROMPT", "")
+        print(f"✅ Prompts saved to {PROMPTS_FILE}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving prompts to {PROMPTS_FILE}: {e}")
+        return False
 
 # Restliche Konfiguration...
 ELEVENLABS_VOICE_ID = "ZthjuvLPty3kTMaNKVKb"
@@ -77,14 +52,41 @@ ELEVENLABS_STABILITY = 0.6
 ELEVENLABS_SIMILARITY_BOOST = 0.8
 ELEVENLABS_STYLE = 0.3
 ELEVENLABS_USE_SPEAKER_BOOST = True
-FILEMAN_MCP_URL = "http://localhost:3000/tool_use" # This is likely a placeholder, the actual path is used in MCP_SERVER_PATHS
+FILEMAN_MCP_URL = "http://localhost:3000/tool_use" # This is likely a placeholder, the actual path is used in MCP_SERVER_CONFIG
 INTERNET_MCP_URL = "http://localhost:3001/tool_use" # Placeholder for internet MCP server
 CLAUDE_API_KEY = "YOUR_CLAUDE_API_KEY"
 ELEVENLABS_API_KEY = "YOUR_ELEVENLABS_API_KEY"
+OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY" # NEU: OpenRouter API Key
 
-# Paths to the actual MCP server executables
-MCP_SERVER_PATHS = [
-    "D:/Users/stefa/servers/src/filesystem/dist/index.js",
-    "D:/Users/stefa/heysiri/mcp-internet/build/index.js"
-]
+# Aktiver LLM (Large Language Model)
+# Optionen: "claude", "openrouter"
+ACTIVE_LLM = "claude" # Standardmäßig Claude verwenden
+
+# MCP Server Konfiguration
+# Jeder Eintrag enthält den Pfad zum Server und einen 'enabled' Status
+MCP_SERVER_CONFIG = {
+    "fileman": {
+        "path": "D:/Users/stefa/servers/src/filesystem/dist/index.js",
+        "enabled": True
+    },
+    "internet": {
+        "path": "D:/Users/stefa/heysiri/mcp-internet/build/index.js",
+        "enabled": True
+    }
+}
+
+# Funktion zum Speichern der MCP Server Konfiguration
+def save_mcp_config(new_config: dict):
+    global MCP_SERVER_CONFIG
+    MCP_SERVER_CONFIG.update(new_config)
+    # For simplicity, we'll save this back to config.py itself for now,
+    # but in a real app, this might go to a separate user settings file.
+    # This part would require more complex file manipulation or a dedicated settings manager.
+    # For now, we'll assume direct modification of this dict is sufficient for runtime.
+    # Persistence would need a more robust solution (e.g., writing to a JSON file).
+    print("✅ MCP Server configuration updated in memory.")
+    # To persist this, we would need to write this dict back to a file.
+    # For now, we'll just update the in-memory representation.
+    return True
+
 MCP_ALLOWED_DIRS = ["D:/Users/stefa/heysiri"] # This might need to be per-server in the future, but for now, keep it global.

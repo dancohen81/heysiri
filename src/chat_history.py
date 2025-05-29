@@ -56,6 +56,10 @@ class ChatHistory:
         recent = self.messages[-limit:] if len(self.messages) > limit else self.messages
         return [{"role": msg["role"], "content": msg["content"]} for msg in recent]
     
+    def get_message_count(self):
+        """Gibt die Anzahl der Nachrichten im Chat-Verlauf zurück."""
+        return len(self.messages)
+
     def clear_history(self):
         """Löscht den gesamten Chat-Verlauf der aktuellen Sitzung."""
         self.messages = []

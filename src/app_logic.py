@@ -11,14 +11,19 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 import sys
 import requests
 
-from src.config import SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL
+from src.config import (
+    SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL,
+    CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT, INTERNET_AGENT_PROMPT, SYSTEM_PROMPT,
+    OPENROUTER_API_KEY, ACTIVE_LLM # NEU: OpenRouter Imports
+)
 from src.chat_history import ChatHistory
-from src.api_clients import ClaudeAPI, ElevenLabsTTS
+from src.api_clients import ClaudeAPI, ElevenLabsTTS, OpenRouterAPI # NEU: OpenRouterAPI
 from src.ui_elements import StatusWindow
 from src.utils import setup_autostart, play_audio_file
 from src.session_manager import ChatSessionManager
 from src.audio_recorder import AudioRecorder
 from src.mcp_client import MCPManager
+from src.settings_window import SettingsWindow # NEU: Import SettingsWindow
 
 class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     """Hauptanwendung mit System Tray Integration"""
@@ -38,6 +43,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         # APIs initialisieren
         self.init_apis()
         
+        # NEU: Aktiven LLM setzen
+        self.llm_api = None
+        self.set_active_llm(ACTIVE_LLM)
+        
         # MCP Manager initialisieren (NEU)
         self.mcp_manager = MCPManager()
         self.mcp_ready = False
@@ -54,12 +63,13 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.status_update_signal.connect(self.window.set_status)
         self.chat_message_signal.connect(self.window.add_chat_message)
         self.window.stop_requested.connect(self.stop_processing_from_ui)
+        self.window.pause_audio_requested.connect(self.toggle_audio_playback) # Connect new signal
 
         # Initialize ChatSessionManager
         self.chat_history = ChatHistory("default")
         self.session_manager = ChatSessionManager(
             self.chat_history, 
-            self.claude, 
+            self.llm_api, # Pass the active LLM API
             self.window, 
             self.status_update_signal, 
             self.chat_message_signal
@@ -90,9 +100,11 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         # Chat-Verlauf laden
         self.session_manager.load_existing_chat()
+        self.window.set_chat_title(self.session_manager.current_session_name) # Update chat title on load
         
-        # Initialize stop flag for managing threads
+        # Initialize stop and pause flags for managing threads
         self.stop_flag = threading.Event()
+        self.pause_flag = threading.Event() # New pause flag
         
         # MCP asynchron starten (NEU)
         self.setup_mcp_async()
@@ -140,23 +152,53 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         return QtGui.QIcon(pixmap)
 
     def init_apis(self):
-        """Initialisiert alle APIs"""
-        self.claude = None
+        """Initialisiert alle APIs (Claude, OpenRouter, ElevenLabs)"""
+        self.claude_api_instance = None
+        self.openrouter_api_instance = None
         self.tts = None
         
         # Claude API
-        if os.getenv("CLAUDE_API_KEY"):
+        claude_key = os.getenv("CLAUDE_API_KEY")
+        if claude_key:
             try:
-                self.claude = ClaudeAPI(os.getenv("CLAUDE_API_KEY"))
+                self.claude_api_instance = ClaudeAPI(claude_key)
+                print("✅ Claude API initialisiert.")
             except Exception as e:
-                print(f"Claude API Init Fehler: {e}")
+                print(f"❌ Claude API Init Fehler: {e}")
         
-        # ElevenLabs TTS (optional)
-        if os.getenv("ELEVENLABS_API_KEY"):
+        # OpenRouter API
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if openrouter_key:
             try:
-                self.tts = ElevenLabsTTS(os.getenv("ELEVENLABS_API_KEY"))
+                self.openrouter_api_instance = OpenRouterAPI(openrouter_key)
+                print("✅ OpenRouter API initialisiert.")
             except Exception as e:
-                print(f"ElevenLabs Init Fehler: {e}")
+                print(f"❌ OpenRouter API Init Fehler: {e}")
+
+        # ElevenLabs TTS (optional)
+        elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+        if elevenlabs_key:
+            try:
+                self.tts = ElevenLabsTTS(elevenlabs_key)
+                print("✅ ElevenLabs TTS initialisiert.")
+            except Exception as e:
+                print(f"❌ ElevenLabs Init Fehler: {e}")
+
+    def set_active_llm(self, llm_name: str):
+        """Setzt den aktiven LLM basierend auf dem Namen."""
+        if llm_name == "claude" and self.claude_api_instance:
+            self.llm_api = self.claude_api_instance
+            print("🧠 Aktiver LLM: Claude")
+        elif llm_name == "openrouter" and self.openrouter_api_instance:
+            self.llm_api = self.openrouter_api_instance
+            print("🧠 Aktiver LLM: OpenRouter")
+        else:
+            self.llm_api = None
+            print(f"❌ Kein gültiger LLM ausgewählt oder API nicht initialisiert: {llm_name}")
+        
+        # Update session manager with the currently active LLM
+        if hasattr(self, 'session_manager'):
+            self.session_manager.claude = self.llm_api # Rename claude to llm_api in session_manager
 
     def get_mcp_status(self):
         """Gibt MCP Status zurück"""
@@ -253,8 +295,9 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             return INTERNET_AGENT_PROMPT
         else:
             print("💬 CHAT-AGENT aktiviert")
+            print(f"DEBUG: Aktiver System Prompt: CHAT_AGENT_PROMPT") # ADDED DEBUG PRINT
             return CHAT_AGENT_PROMPT
-    
+
     def setup_tray_menu(self):
         """Erstellt das System-Tray-Menü"""
         self.menu = QtWidgets.QMenu()
@@ -280,6 +323,8 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.menu.addAction("🗑️ Aktuelle Sitzung löschen", self.session_manager.clear_current_chat_session)
         self.menu.addAction("⚙️ Autostart aktivieren", self.enable_autostart)
         self.menu.addSeparator()
+        self.menu.addAction("⚙️ Einstellungen", self.open_settings_window) # NEU: Einstellungen-Menüpunkt
+        self.menu.addSeparator()
         self.menu.addAction("📝 System Prompt bearbeiten", self.edit_system_prompt)
         self.menu.addAction("Sound ElevenLabs Einstellungen", self.edit_elevenlabs_settings)
         self.menu.addSeparator()
@@ -294,6 +339,26 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         """Aktualisiert MCP Status im Tray-Menü beim Öffnen"""
         current_status = self.get_mcp_status()
         self.mcp_status_action.setText(f"🔧 {current_status}")
+
+    # NEU: Methode zum Öffnen des Einstellungsfensters
+    def open_settings_window(self):
+        """Öffnet das Einstellungsfenster."""
+        # Pass the mcp_manager instance to the settings window
+        settings_dialog = SettingsWindow(self.mcp_manager, self.window)
+        settings_dialog.exec_()
+        # After settings are saved, re-setup MCP manager to apply changes
+        # This needs to be run in an async context, so we'll use a thread for now.
+        # A more robust solution would involve better async integration with PyQt.
+        def run_mcp_re_setup():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.mcp_manager.setup())
+            self.mcp_ready = self.mcp_manager.is_ready()
+            self.status_update_signal.emit("✅ MCP Manager neu initialisiert.", "green")
+            loop.close()
+        threading.Thread(target=run_mcp_re_setup, daemon=True).start()
+        self.update_tray_menu_status() # Update tray status immediately
+
     def _quit_app(self):
         """Beendet App und stoppt MCP"""
         if self.mcp_manager:
@@ -572,29 +637,29 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.chat_message_signal.emit("user", user_text)
         self.chat_history.add_message("user", user_text)
 
-        if not self.claude:
-            self.status_update_signal.emit("Claude API nicht verfügbar", "red")
+        if not self.llm_api:
+            self.status_update_signal.emit("Kein LLM API verfügbar", "red")
             self.window.enable_send_button()
             self.window.disable_stop_button()
             return
                 
-        self.status_update_signal.emit("🤖 Claude antwortet...", "blue")
+        self.status_update_signal.emit(f"🤖 {self.llm_api.__class__.__name__.replace('API', '')} antwortet...", "blue")
         self.window.disable_send_button()
         self.window.enable_stop_button()
             
-        # Starte Claude-Verarbeitung in separatem Thread
-        threading.Thread(target=self._process_claude_with_tools, args=(user_text,), daemon=True).start()
+        # Starte LLM-Verarbeitung in separatem Thread
+        threading.Thread(target=self._process_llm_with_tools, args=(user_text,), daemon=True).start()
 
-    def _process_claude_with_tools(self, user_text):
-        """Verarbeitet Claude-Anfrage mit MCP Tools in separatem Thread"""
+    def _process_llm_with_tools(self, user_text): # Umbenannt von _process_claude_with_tools
+        """Verarbeitet LLM-Anfrage mit MCP Tools in separatem Thread"""
         try:
             # Async MCP-Verarbeitung in eigenem Event Loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._handle_claude_with_mcp())
+            loop.run_until_complete(self._handle_llm_with_mcp()) # Umbenannt von _handle_claude_with_mcp
             loop.close()
         except Exception as e:
-            self.status_update_signal.emit(f"Claude Verarbeitungsfehler: {e}", "red")
+            self.status_update_signal.emit(f"LLM Verarbeitungsfehler: {e}", "red")
             self.window.enable_send_button()
             self.window.disable_stop_button()
             
@@ -607,13 +672,13 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         if is_file_operation:
             print("🔧 FILE-AGENT aktiviert")
-            return "Du bist ein Dateisystem-Agent. Verwende IMMER echte MCP-Tools. KEINE JSON-Simulation. Vollständige Pfade: D:/Users/stefa/heysiri/DATEINAME"
+            return FILE_AGENT_PROMPT
         else:
             print("💬 CHAT-AGENT aktiviert")
-            return "Du bist ein freundlicher Chat-Assistent auf Deutsch. Sei hilfsbereit und gesprächig."        
+            return CHAT_AGENT_PROMPT        
 
-    async def _handle_claude_with_mcp(self):
-        """Async Handler für Claude mit MCP Tools"""
+    async def _handle_llm_with_mcp(self): # Umbenannt von _handle_claude_with_mcp
+        """Async Handler für LLM mit MCP Tools"""
         try:
             if self.stop_flag.is_set():
                 return
@@ -631,51 +696,62 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             # DUAL-AGENT: System Prompt basierend auf Anfrage wählen
             system_prompt = self.get_system_prompt_for_request(last_user_message)
 
-            # MCP Tools für Claude laden (falls verfügbar)
+            # MCP Tools für LLM laden (falls verfügbar)
             tools = []
             if self.mcp_ready and self.mcp_manager.is_ready():
-                tools = self.mcp_manager.get_tools_for_claude()
+                tools = self.mcp_manager.get_tools_for_claude() # Still uses Claude's tool format
                 if tools:
-                    self.status_update_signal.emit(f"🔧 Claude hat Zugriff auf {len(tools)} Tools", "blue")
+                    self.status_update_signal.emit(f"🔧 {self.llm_api.__class__.__name__.replace('API', '')} hat Zugriff auf {len(tools)} Tools", "blue")
 
             if self.stop_flag.is_set():
                 return
 
-            # Erste Claude-Anfrage mit dynamischem System Prompt
+            # Erste LLM-Anfrage mit dynamischem System Prompt
+            response = None
             if tools:
-                print(f"🤖 DEBUG: Sende {len(tools)} Tools an Claude API")
-                # WICHTIG: Hier System Prompt verwenden (falls ClaudeAPI das unterstützt)
-                response = self.claude.send_message_with_tools(context_messages, tools, system_prompt=system_prompt)
+                print(f"🤖 DEBUG: Sende {len(tools)} Tools an {self.llm_api.__class__.__name__}")
+                response = self.llm_api.send_message_with_tools(context_messages, tools, system_prompt=system_prompt)
             else:
                 # Fallback: Normale Nachricht ohne Tools
-                content = self.claude.send_message(context_messages, system_prompt=system_prompt)
-                response = {
-                    "text": content if isinstance(content, str) else (content[0]["text"] if content and content[0].get("type") == "text" else ""),
-                    "tool_calls": [],
-                    "raw_content": content if not isinstance(content, str) else [{"type": "text", "text": content}]
-                }
+                content = self.llm_api.send_message(context_messages, system_prompt=system_prompt)
+                # Ensure response format is consistent for both LLMs
+                if isinstance(content, dict) and "text" in content: # OpenRouter returns dict
+                    response = content
+                elif isinstance(content, str): # Claude returns str if no tools
+                    response = {
+                        "text": content,
+                        "tool_calls": [],
+                        "raw_content": [{"type": "text", "text": content}]
+                    }
+                elif isinstance(content, list) and content and content[0].get("type") == "text": # Claude returns list of content blocks with tools=True but no tool_calls
+                    response = {
+                        "text": content[0]["text"],
+                        "tool_calls": [],
+                        "raw_content": content
+                    }
+                else:
+                    response = {"text": "", "tool_calls": [], "raw_content": []}
+
 
             if self.stop_flag.is_set():
                 return
 
-            # Prüfe ob Claude Tools verwenden möchte
+            # Prüfe ob LLM Tools verwenden möchte
             if response["tool_calls"] and self.mcp_ready:
                 await self._execute_tool_calls(response, context_messages, tools, system_prompt)
             else:
                 # Normale Antwort ohne Tool-Verwendung
                 if response["text"]:
-                    self._handle_claude_response(response["text"])
+                    self._handle_llm_response(response["text"]) # Umbenannt von _handle_claude_response
                 else:
-                    self.status_update_signal.emit("❌ Leere Antwort von Claude", "red")
+                    self.status_update_signal.emit("❌ Leere Antwort vom LLM", "red")
 
         except Exception as e:
-            self.status_update_signal.emit(f"Claude Fehler: {e}", "red")
+            self.status_update_signal.emit(f"LLM Fehler: {e}", "red")
+            print(f"❌ LLM Fehler Details: {e}")
         finally:
             self.window.enable_send_button()
             self.window.disable_stop_button()
-
-# HINWEIS: Falls ClaudeAPI keinen system_prompt Parameter hat, 
-# dann müssen wir api_clients.py auch anpassen!
 
     async def _execute_tool_calls(self, initial_response, context_messages, tools, system_prompt):
         """Führt Tool-Aufrufe aus und holt finale Antwort in einer Schleife"""
@@ -709,7 +785,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 # Tool über MCP ausführen
                 result = await self.mcp_manager.execute_tool(tool_name, tool_args)
                 
-                # Tool-Ergebnis für Claude formatieren
+                # Tool-Ergebnis für LLM formatieren (muss mit Claude's Tool-Result Format übereinstimmen)
                 tool_result = {
                     "role": "user",
                     "content": [{
@@ -728,14 +804,14 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             # Füge Tool-Ergebnisse zu den Nachrichten hinzu
             current_messages.extend(tool_results)
             
-            self.status_update_signal.emit("🤖 Claude verarbeitet Ergebnisse und sucht nach weiteren Tools...", "blue")
-            print("DEBUG: Sende Tool-Ergebnisse zurück an Claude für nächste Runde.")
+            self.status_update_signal.emit(f"🤖 {self.llm_api.__class__.__name__.replace('API', '')} verarbeitet Ergebnisse und sucht nach weiteren Tools...", "blue")
+            print("DEBUG: Sende Tool-Ergebnisse zurück an LLM für nächste Runde.")
             
-            # Nächste Claude-Anfrage mit Tool-Ergebnissen
-            current_response = self.claude.send_message_with_tools(current_messages, tools, system_prompt=system_prompt)
+            # Nächste LLM-Anfrage mit Tool-Ergebnissen
+            current_response = self.llm_api.send_message_with_tools(current_messages, tools, system_prompt=system_prompt)
             
-            # Debug der aktuellen Claude-Antwort
-            self.debug_claude_response(current_response, True, tools) # True, da wir weitere Tools erwarten könnten
+            # Debug der aktuellen LLM-Antwort
+            self.debug_llm_response(current_response, True, tools) # Umbenannt von debug_claude_response
 
             # Füge die neue Assistenten-Antwort (mit möglichen neuen Tool-Aufrufen) zu den Nachrichten hinzu
             if current_response["raw_content"]:
@@ -745,12 +821,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 })
             
             if not current_response["tool_calls"]:
-                print("DEBUG: Claude hat keine weiteren Tool-Aufrufe generiert. Beende Schleife.")
+                print("DEBUG: LLM hat keine weiteren Tool-Aufrufe generiert. Beende Schleife.")
                 break # Keine weiteren Tool-Aufrufe, Schleife beenden
 
         # Finale Antwort verarbeiten (Text oder Abschlussmeldung)
         if current_response["text"]:
-            self._handle_claude_response(current_response["text"])
+            self._handle_llm_response(current_response["text"]) # Umbenannt von _handle_claude_response
         else:
             self.status_update_signal.emit("✅ Alle Tool-Aktionen abgeschlossen.", "green")
             print("DEBUG: Alle Tool-Aktionen abgeschlossen, keine Textantwort.")
@@ -761,15 +837,31 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         print("DEBUG: _execute_tool_calls beendet.")
 
-    def _handle_claude_response(self, claude_text):
-        """Verarbeitet Claude-Antwort (Text-Ausgabe + TTS)"""
+    def _handle_llm_response(self, llm_text): # Umbenannt von _handle_claude_response
+        """Verarbeitet LLM-Antwort (Text-Ausgabe + TTS)"""
         try:
             if self.stop_flag.is_set():
                 return
 
-            # Claude-Antwort anzeigen und speichern
-            self.chat_message_signal.emit("assistant", claude_text)
-            self.chat_history.add_message("assistant", claude_text)
+            # LLM-Antwort anzeigen und speichern
+            self.chat_message_signal.emit("assistant", llm_text)
+            self.chat_history.add_message("assistant", llm_text)
+
+            # NEU: Titel generieren, wenn noch "default" und genug Nachrichten
+            if self.session_manager.current_session_name == "default" and self.chat_history.get_message_count() >= 2:
+                def generate_title_and_update():
+                    generated_title = self.session_manager._generate_session_title_with_ai(self.chat_history.messages)
+                    if generated_title:
+                        self.session_manager.current_session_name = generated_title
+                        self.chat_history.session_name = generated_title # Update ChatHistory instance
+                        self.chat_history.save_history() # Save with new title
+                        self.window.set_chat_title(generated_title)
+                        self.status_update_signal.emit(f"Titel generiert: '{generated_title}'", "green")
+                    else:
+                        self.status_update_signal.emit("Titelgenerierung fehlgeschlagen.", "yellow")
+                
+                # Führe Titelgenerierung in einem separaten Thread aus, um UI nicht zu blockieren
+                threading.Thread(target=generate_title_and_update, daemon=True).start()
             
             # Text-to-Speech (optional)
             if self.tts:
@@ -777,12 +869,16 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 try:
                     if self.stop_flag.is_set():
                         return
-                    audio_file = self.tts.text_to_speech(claude_text)
+                    print(f"DEBUG: LLM Text vor TTS: '{llm_text}'") # ADDED DEBUG PRINT
+                    audio_file = self.tts.text_to_speech(llm_text)
                     if self.stop_flag.is_set():
                         return
-                    play_audio_file(audio_file, self.stop_flag)
+                    self.window.enable_pause_button() # Enable pause button when audio starts
+                    play_audio_file(audio_file, self.stop_flag, self.pause_flag)
+                    self.window.disable_pause_button() # Disable pause button when audio finishes
                     self.status_update_signal.emit("✅ Gespräch abgeschlossen", "green")
                 except Exception as e:
+                    self.window.disable_pause_button() # Ensure button is disabled on error
                     if "529" in str(e):
                         self.status_update_signal.emit("ElevenLabs überlastet - Text wurde trotzdem angezeigt", "yellow")
                     else:
@@ -791,11 +887,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.status_update_signal.emit("✅ Antwort erhalten", "green")
                 
         except Exception as e:
+            self.window.disable_pause_button() # Ensure button is disabled on error
             self.status_update_signal.emit(f"Antwort-Verarbeitung Fehler: {e}", "red")
             
-    def debug_claude_response(self, response, expected_tool_op, tools_available):
-        """Debug: Analysiert Claude Response"""
-        print("\n=== CLAUDE RESPONSE DEBUG ===")
+    def debug_llm_response(self, response, expected_tool_op, tools_available): # Umbenannt von debug_claude_response
+        """Debug: Analysiert LLM Response"""
+        print("\n=== LLM RESPONSE DEBUG ===")
         print(f"📝 Response Text: {response['text'][:100]}...")
         print(f"🔧 Tool Calls: {len(response.get('tool_calls', []))}")
         print(f"⚙️ Expected Tool Op: {expected_tool_op}")
@@ -806,6 +903,19 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 print(f"  Tool {i+1}: {tool_call.get('name', 'Unknown')}")
         
         print("============================\n")
+
+    def toggle_audio_playback(self):
+        """Toggles audio playback between paused and resumed states."""
+        if hasattr(self, 'pause_flag'):
+            if self.pause_flag.is_set():
+                self.pause_flag.clear() # Resume
+                self.status_update_signal.emit("▶️ Audio fortgesetzt.", "green")
+            else:
+                self.pause_flag.set() # Pause
+                self.status_update_signal.emit("⏸️ Audio pausiert.", "yellow")
+        else:
+            self.status_update_signal.emit("Kein Audio zum Pausieren/Fortsetzen.", "yellow")
+
 
     def force_file_operation_prompt(self, operation_type, details):
         """Erstellt einen zwingenden Prompt für Dateisystem-Operationen"""
@@ -1004,12 +1114,16 @@ def check_api_keys():
     """Prüft verfügbare API Keys"""
     missing_keys = []
     
+    # OpenAI API key is used by Whisper for transcription
     if not openai.api_key:
-        missing_keys.append("OPENAI_API_KEY (erforderlich)")
-    if not CLAUDE_API_KEY:
-        missing_keys.append("CLAUDE_API_KEY (erforderlich)")
+        missing_keys.append("OPENAI_API_KEY (erforderlich für Whisper)")
+    
+    # Check for at least one LLM API key
+    if not CLAUDE_API_KEY and not OPENROUTER_API_KEY:
+        missing_keys.append("CLAUDE_API_KEY oder OPENROUTER_API_KEY (mindestens einer erforderlich)")
+    
     if not ELEVENLABS_API_KEY:
-        missing_keys.append("ELEVENLABS_API_KEY (optional)")
+        missing_keys.append("ELEVENLABS_API_KEY (optional für TTS)")
     
     return missing_keys
 

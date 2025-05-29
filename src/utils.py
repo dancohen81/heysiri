@@ -5,6 +5,8 @@ import winshell
 from win32com.client import Dispatch
 from PyQt5 import QtWidgets
 import openai
+import threading # Added for pause/resume functionality
+import time # Added for pause/resume functionality
 
 def setup_autostart():
     """Richtet Windows Autostart ein"""
@@ -23,8 +25,8 @@ def setup_autostart():
         print(f"Autostart Setup Fehler: {e}")
         return False
 
-def play_audio_file(filename, stop_event=None):
-    """Spielt Audio-Datei ab (Windows) - robustere Version, mit Stopp-Möglichkeit"""
+def play_audio_file(filename, stop_event=None, pause_event=None):
+    """Spielt Audio-Datei ab (Windows) - robustere Version, mit Stopp- und Pause-Möglichkeit"""
     try:
         # Prüfen ob Datei existiert
         if not os.path.exists(filename):
@@ -43,6 +45,13 @@ def play_audio_file(filename, stop_event=None):
                 if stop_event and stop_event.is_set():
                     pygame.mixer.music.stop()
                     break
+                
+                if pause_event and pause_event.is_set():
+                    pygame.mixer.music.pause()
+                    while pause_event.is_set():
+                        time.sleep(0.1) # Wait while paused
+                    pygame.mixer.music.unpause()
+                
                 pygame.time.wait(100)
             
             pygame.mixer.quit()
@@ -81,9 +90,6 @@ def play_audio_file(filename, stop_event=None):
         # Audio-Datei nach Wiedergabe löschen (nach kurzer Verzögerung)
         # Nur löschen, wenn nicht gestoppt wurde oder es sich um eine temporäre Datei handelt
         try:
-            import threading
-            import time
-            
             def cleanup_audio():
                 # Only clean up if playback finished naturally or it's a temp file
                 # If stop_event is set, it means it was interrupted, so don't delete immediately

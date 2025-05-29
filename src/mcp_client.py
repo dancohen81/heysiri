@@ -233,11 +233,13 @@ class MCPClient:
             claude_tool = {
                 "name": tool_name,
                 "description": tool_info.get("description", f"MCP Tool: {tool_name}"),
-                "input_schema": tool_info.get("inputSchema", {
-                    "type": "object",
-                    "properties": {}
-                })
+                "input_schema": tool_info.get("inputSchema", {"type": "object", "properties": {}})
             }
+            # Ensure input_schema is a valid JSON schema structure
+            if not isinstance(claude_tool["input_schema"], dict):
+                print(f"⚠️ Ungültiges input_schema für Tool '{tool_name}'. Setze auf Standard.")
+                claude_tool["input_schema"] = {"type": "object", "properties": {}}
+            
             claude_tools.append(claude_tool)
             
         return claude_tools
@@ -260,24 +262,35 @@ class MCPClient:
         print("🔌 MCP Client gestoppt")
 
 
-from src.config import MCP_SERVER_PATHS, MCP_ALLOWED_DIRS
+from src.config import MCP_SERVER_CONFIG, MCP_ALLOWED_DIRS, save_mcp_config
 
 class MCPManager:
     """Manager für mehrere MCP Clients mit einfacher API"""
     
     def __init__(self):
-        self.clients: Dict[str, MCPClient] = {} # Store clients by a unique identifier (e.g., server path)
+        self.clients: Dict[str, MCPClient] = {} # Store clients by a unique identifier (e.g., server ID)
         self.ready = False
         
     async def setup(self):
-        """Initialisiert alle MCP Clients basierend auf MCP_SERVER_PATHS"""
-        self.clients = {} # Reset clients
+        """Initialisiert alle MCP Clients basierend auf MCP_SERVER_CONFIG"""
+        # Stoppe alle bestehenden Clients, bevor neue gestartet werden
+        self.stop() 
+        self.clients = {} 
         all_ready = True
         
-        for server_path in MCP_SERVER_PATHS:
+        for server_id, config in MCP_SERVER_CONFIG.items():
+            server_path = config.get("path")
+            enabled = config.get("enabled", False) # Default to disabled if not specified
+            
+            if not server_path:
+                print(f"⚠️ MCP Server '{server_id}' hat keinen Pfad konfiguriert. Überspringe.")
+                continue
+
+            if not enabled:
+                print(f"ℹ️ MCP Server '{server_id}' ist deaktiviert. Überspringe Start.")
+                continue
+
             try:
-                # Use the base name of the server path as a simple identifier for now
-                server_id = os.path.basename(os.path.dirname(server_path)) 
                 client = MCPClient(server_path, MCP_ALLOWED_DIRS) # Pass global allowed_dirs for now
                 
                 print(f"🔧 Versuche, MCP Client für {server_id} zu starten...")
@@ -290,11 +303,46 @@ class MCPManager:
                     print(f"❌ MCP Client für {server_id} konnte nicht gestartet werden.")
                     all_ready = False
             except Exception as e:
-                print(f"❌ Fehler beim Starten des MCP Clients für {server_path}: {e}")
+                print(f"❌ Fehler beim Starten des MCP Clients für {server_id}: {e}")
                 all_ready = False
                 
         self.ready = all_ready and bool(self.clients) # Ensure at least one client is ready
         return self.ready
+
+    def get_mcp_status(self) -> Dict[str, Dict[str, Any]]:
+        """Gibt den Status aller MCP Server zurück (aktiv/inaktiv, enabled/disabled)"""
+        status = {}
+        for server_id, config in MCP_SERVER_CONFIG.items():
+            is_running = self.clients.get(server_id) and self.clients[server_id].is_ready()
+            status[server_id] = {
+                "path": config.get("path"),
+                "enabled": config.get("enabled", False),
+                "running": is_running
+            }
+        return status
+
+    async def set_mcp_enabled(self, server_id: str, enabled: bool) -> bool:
+        """
+        Setzt den 'enabled' Status eines MCP Servers und versucht, ihn neu zu starten/stoppen.
+        """
+        if server_id not in MCP_SERVER_CONFIG:
+            print(f"❌ MCP Server '{server_id}' nicht gefunden.")
+            return False
+        
+        current_config = MCP_SERVER_CONFIG[server_id]
+        if current_config["enabled"] == enabled:
+            print(f"ℹ️ MCP Server '{server_id}' ist bereits im gewünschten Zustand (enabled={enabled}).")
+            return True
+
+        current_config["enabled"] = enabled
+        save_mcp_config({server_id: current_config}) # Update in-memory config
+
+        # Attempt to restart/stop the specific client or the whole manager
+        # For simplicity and robustness, we'll re-setup all clients.
+        # In a more complex app, you might try to stop/start only the affected client.
+        print(f"🔄 Re-initialisiere MCP Manager nach Änderung für '{server_id}'.")
+        await self.setup() # Re-setup all clients based on new config
+        return True
     
     def get_tools_for_claude(self) -> list:
         """Aggregiert Tools von allen aktiven MCP Clients für Claude"""

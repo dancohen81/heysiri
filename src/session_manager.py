@@ -5,36 +5,69 @@ from PyQt5 import QtWidgets, QtCore
 from src.chat_history import ChatHistory
 
 class ChatSessionManager:
-    def __init__(self, chat_history: ChatHistory, claude_api, window, status_update_signal, chat_message_signal):
+    def __init__(self, chat_history: ChatHistory, llm_api, window, status_update_signal, chat_message_signal):
         self.chat_history = chat_history
-        self.claude = claude_api
+        self.llm_api = llm_api # Renamed from claude
         self.window = window
         self.status_update_signal = status_update_signal
         self.chat_message_signal = chat_message_signal
         self.current_session_name = self.chat_history.session_name
 
     def _generate_session_title_with_ai(self, messages):
-        """Generiert einen Sitzungstitel basierend auf dem Chat-Verlauf mit Claude."""
-        if not self.claude:
-            print("Claude API nicht verfügbar für Titelgenerierung.")
+        """Generiert einen Sitzungstitel basierend auf dem Chat-Verlauf mit dem aktiven LLM."""
+        if not self.llm_api:
+            print("LLM API nicht verfügbar für Titelgenerierung.")
             return None
 
-        # Erstelle einen Prompt für Claude, um das Thema zu extrahieren
-        prompt_messages = [
-            {"role": "user", "content": "Fasse den folgenden Chat-Verlauf in einem sehr kurzen, prägnanten Titel (maximal 5-7 Wörter) zusammen, der das Hauptthema der Diskussion widerspiegelt. Antworte nur mit dem Titel, ohne zusätzliche Erklärungen oder Satzzeichen am Ende. Beispiel: 'Diskussion über Wettervorhersage' oder 'Planung des Projekts'.\n\nChat-Verlauf:\n"}
-        ]
-        for msg in messages:
-            prompt_messages.append({"role": msg["role"], "content": msg["content"]})
+        # System Prompt für die Titelgenerierung
+        title_generation_system_prompt = """Du bist ein KI-Assistent, der darauf spezialisiert ist, kurze, prägnante Titel für Chat-Verläufe zu generieren.
 
+Deine Aufgabe ist es, das Hauptthema des bereitgestellten Chat-Verlaufs in einem Titel von maximal 5-7 Wörtern zusammenzufassen.
+Antworte NUR mit dem Titel.
+
+Beispiele:
+- 'Diskussion über Wettervorhersage'
+- 'Planung des Projekts'
+- 'Fehlerbehebung Netzwerkprobleme'
+- 'Rezept für Schokoladenkuchen'
+"""
         try:
-            # Claude API aufrufen
-            response = self.claude.send_message(prompt_messages)
-            # Bereinige die Antwort, falls Claude doch mehr als nur den Titel liefert
-            title = response.strip().replace('.', '').replace('"', '')
+            # Prepare messages for the LLM API (remove extra keys like 'timestamp')
+            llm_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+
+            # LLM API aufrufen, Chat-Verlauf als Nachrichten und Anweisung als System Prompt
+            response = self.llm_api.send_message(llm_messages, system_prompt=title_generation_system_prompt)
+            # Bereinige die Antwort, falls LLM doch mehr als nur den Titel liefert
+            # OpenRouter's send_message returns a dict, Claude's returns a string if no tools
+            if isinstance(response, dict) and "text" in response:
+                title = response["text"].strip().replace('.', '').replace('"', '')
+            elif isinstance(response, str):
+                title = response.strip().replace('.', '').replace('"', '')
+            else:
+                title = "" # Fallback
+
+            if not title and messages:
+                # Fallback: Use the first user message as a title if LLM returns empty
+                first_user_message = next((msg["content"] for msg in messages if msg["role"] == "user"), None)
+                if first_user_message:
+                    title = first_user_message[:50].strip() + "..." if len(first_user_message) > 50 else first_user_message.strip()
+                    print(f"DEBUG: LLM returned empty title, using fallback: '{title}'")
+                else:
+                    title = "Neue Chat-Sitzung"
+                    print("DEBUG: LLM returned empty title and no user messages, using generic title.")
+            elif not title:
+                title = "Neue Chat-Sitzung"
+                print("DEBUG: LLM returned empty title, using generic title.")
+
             return title
         except Exception as e:
             print(f"Fehler bei der KI-Titelgenerierung: {e}")
-            return None
+            # Fallback in case of API error
+            if messages:
+                first_user_message = next((msg["content"] for msg in messages if msg["role"] == "user"), None)
+                if first_user_message:
+                    return first_user_message[:50].strip() + "..." if len(first_user_message) > 50 else first_user_message.strip()
+            return "Neue Chat-Sitzung"
 
     def load_existing_chat(self):
         """Lädt den Chat-Verlauf der aktuellen Sitzung in die UI."""

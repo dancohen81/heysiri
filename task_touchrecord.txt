@@ -1,0 +1,24 @@
+AUFGABE: Verbesserung der Record-Taste in der Weste-App
+
+PROBLEM:
+- Bei kurzer Berührung der Record-Taste (< 0,5 Sek) wird ungewollt "Untertitel der Amara.org-Community" eingefügt
+- Die Aufnahme soll nur starten, wenn die Taste mind. 0,5 Sekunden gedrückt wird
+
+ANFORDERUNGEN:
+1. Implementiere eine Zeitprüfung für die Record-Taste
+   - Mindesthaltezeit: 0,5 Sekunden
+   - Bei kürzerer Berührung: Keine Aktion auslösen
+   - Bei ≥ 0,5 Sekunden: Aufnahme starten
+
+2. Entferne den automatischen Text-Einfüge-Mechanismus für "Untertitel der Amara.org-Community"
+
+3. Stelle sicher, dass das Touch-Feedback für den Nutzer eindeutig ist
+   - Visuelles oder haptisches Feedback nach 0,5 Sek möglich
+   - Klare Unterscheidung zwischen "zu kurz" und "Aufnahme startet"
+
+TECHNISCHE HINWEISE:
+- Implementiere einen Timer/Countdown für die Touch-Erkennung
+- Nutze Event-Handler für touchStart und touchEnd
+- Vermeide Race-Conditions bei schnell aufeinanderfolgenden Berührungen
+
+Bitte implementiere diese Änderungen im bestehenden Code der Weste-App.
