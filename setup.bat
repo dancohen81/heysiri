@@ -82,7 +82,7 @@ echo 🚀 Danach starten mit:
 echo   start.bat
 echo.
 echo oder manuell:
-echo   uv run python voice_chat_app.py
+echo   uv run python -m src.main
 echo.
 
 REM .env Datei automatisch erstellen falls nicht vorhanden

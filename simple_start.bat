@@ -10,9 +10,9 @@ if errorlevel 1 (
 )
 
 REM Prüfen ob voice_chat_app.py existiert
-if not exist "voice_chat_app.py" (
-    echo ❌ FEHLER: voice_chat_app.py nicht gefunden!
-    echo Bitte speichere die Hauptdatei aus dem Artifact.
+if not exist "src\main.py" (
+    echo ❌ FEHLER: src\main.py nicht gefunden!
+    echo Bitte stelle sicher, dass die Hauptdatei im 'src' Ordner ist.
     pause
     exit /b 1
 )
@@ -37,7 +37,7 @@ REM Versuche zuerst mit UV (falls vorhanden)
 uv --version >nul 2>&1
 if not errorlevel 1 (
     echo 📦 Verwende UV...
-    uv run --with-requirements requirements.txt python voice_chat_app.py
+    uv run --with-requirements requirements.txt python -m src.main
 ) else (
     REM Fallback: Standard Python mit pip
     echo 📦 Verwende Standard Python...
@@ -48,7 +48,7 @@ if not errorlevel 1 (
     
     call venv\Scripts\activate.bat
     pip install -q -r requirements.txt
-    python voice_chat_app.py
+    python -m src.main
 )
 
 if errorlevel 1 (

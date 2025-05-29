@@ -51,7 +51,7 @@ if "%keys_found%"=="0" (
 
 REM App starten mit UV
 echo 🚀 Starte Voice Chat App mit UV...
-uv run python voice_chat_app.py
+uv run python -m src.main
 
 REM Falls Fehler auftreten
 if errorlevel 1 (
