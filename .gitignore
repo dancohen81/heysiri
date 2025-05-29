@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.vscode/
+
+# OS
+.DS_Store
+.Trashes
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*~
+
+# Specific to this project
+claude_response*.mp3 # Wildcard for generated audio files
+temp_aufnahme.wav
+.env
+voice-chat-project/

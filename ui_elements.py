@@ -1,0 +1,241 @@
+from PyQt5 import QtWidgets, QtGui, QtCore
+import datetime
+
+class StatusWindow(QtWidgets.QWidget):
+    """Haupt-UI-Fenster der Anwendung"""
+    
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🎤 Voice Chat mit Claude")
+        self.setWindowFlags(
+            QtCore.Qt.WindowStaysOnTopHint | # Keep on top
+            QtCore.Qt.WindowMinimizeButtonHint # Keep minimize button
+        )
+        self.setGeometry(100, 100, 500, 300) # Initial size, now resizable
+        self.setup_ui()
+        self.setup_keyboard()
+        self.input_field.setFocus() # Set initial focus to the input field
+
+    def setup_ui(self):
+        """Erstellt die Benutzeroberfläche"""
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: 11pt;
+            }
+            QLabel {
+                padding: 5px;
+                background-color: #2d2d2d;
+                border: 1px solid #444;
+                border-radius: 3px;
+            }
+            QTextEdit {
+                background-color: #2d2d2d;
+                border: 1px solid #444;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 10pt;
+            }
+            QPushButton {
+                background-color: #0d7377;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #14a085;
+            }
+            QPushButton:pressed {
+                background-color: #0a5d61;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout()
+        
+        # Status-Anzeige
+        self.status_label = QtWidgets.QTextEdit("🟢 Bereit - Leertaste halten zum Sprechen")
+        self.status_label.setReadOnly(True)
+        self.status_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard)
+        self.status_label.setMinimumHeight(30) # Ensure minimum height
+        self.status_label.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff) # Hide scrollbar
+        self.status_label.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff) # Hide scrollbar
+        layout.addWidget(self.status_label)
+        
+        # Chat-Verlauf
+        chat_label = QtWidgets.QLabel("Chat-Verlauf:")
+        layout.addWidget(chat_label)
+        
+        self.chat_display = QtWidgets.QTextEdit()
+        self.chat_display.setMaximumHeight(180)
+        layout.addWidget(self.chat_display)
+
+        # Input field for manual text entry
+        self.input_field = QtWidgets.QLineEdit()
+        self.input_field.setPlaceholderText("Nachricht eingeben oder Leertaste halten zum Sprechen...")
+        self.input_field.returnPressed.connect(self._on_send_button_clicked) # Send on Enter key
+        self.input_field.installEventFilter(self) # Install event filter on input field
+        layout.addWidget(self.input_field)
+
+        # Send and Stop buttons
+        send_stop_button_layout = QtWidgets.QHBoxLayout()
+        self.send_button = QtWidgets.QPushButton("Senden")
+        self.send_button.clicked.connect(self._on_send_button_clicked)
+        send_stop_button_layout.addWidget(self.send_button)
+
+        self.stop_button = QtWidgets.QPushButton("🛑 Stopp")
+        self.stop_button.clicked.connect(self.stop_requested)
+        self.stop_button.setEnabled(False) # Initially disabled
+        send_stop_button_layout.addWidget(self.stop_button)
+        
+        send_stop_button_layout.addStretch(1) # Push buttons to the right
+        layout.addLayout(send_stop_button_layout)
+        
+        # Other Buttons
+        button_layout = QtWidgets.QHBoxLayout()
+        
+        self.new_session_btn = QtWidgets.QPushButton("✨ Neue Sitzung")
+        self.new_session_btn.clicked.connect(self.new_session_requested)
+        button_layout.addWidget(self.new_session_btn)
+
+        self.save_session_btn = QtWidgets.QPushButton("💾 Speichern unter...")
+        self.save_session_btn.clicked.connect(self.save_session_requested)
+        button_layout.addWidget(self.save_session_btn)
+
+        self.load_session_btn = QtWidgets.QPushButton(" Sitzung laden...")
+        self.load_session_btn.clicked.connect(self.load_session_requested)
+        button_layout.addWidget(self.load_session_btn)
+
+        self.export_chat_btn = QtWidgets.QPushButton("📄 Chat exportieren")
+        self.export_chat_btn.clicked.connect(self.export_chat_requested)
+        button_layout.addWidget(self.export_chat_btn)
+        
+        self.clear_btn = QtWidgets.QPushButton("🗑️ Aktuelle Sitzung löschen")
+        self.clear_btn.clicked.connect(self._on_clear_button_clicked) # Connect to new handler method
+        button_layout.addWidget(self.clear_btn)
+        
+        self.minimize_btn = QtWidgets.QPushButton("📱 Minimieren")
+        self.minimize_btn.clicked.connect(self.hide)
+        button_layout.addWidget(self.minimize_btn)
+        
+        self.close_btn = QtWidgets.QPushButton("❌ Schliessen")
+        self.close_btn.clicked.connect(QtWidgets.qApp.quit)
+        button_layout.addWidget(self.close_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def setup_keyboard(self):
+        """Richtet Tastatur-Events ein"""
+        self.alt_pressed = False # Changed from space_pressed
+        # self.grabKeyboard() # Removed: No longer needed with event filter
+
+    def eventFilter(self, obj, event):
+        """Event Filter to intercept key presses on the input field."""
+        if obj is self.input_field and event.type() in [QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease]:
+            if event.key() == QtCore.Qt.Key_Space:
+                # Allow space to be entered into the input field
+                return False
+            elif event.key() == QtCore.Qt.Key_Alt:
+                # Do not set alt_pressed when Alt is pressed in the input field
+                # This ensures Alt+Space combinations don't trigger recording while typing
+                self.alt_pressed = False
+                return False # Allow Alt to pass through if needed by other handlers
+        return super().eventFilter(obj, event) # For other events, pass to base class
+
+    def set_status(self, text, color="white"):
+        """Setzt Status-Text"""
+        color_map = {
+            "green": "🟢",
+            "red": "🔴", 
+            "yellow": "🟡",
+            "blue": "🔵"
+        }
+        
+        if color in color_map:
+            text = f"{color_map[color]} {text}"
+        
+        # For QTextEdit, use setHtml or setPlainText and then set alignment
+        self.status_label.setHtml(f"<div align='center'>{text}</div>")
+
+    def add_chat_message(self, role, message):
+        """Fügt Nachricht zum Chat-Display hinzu"""
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        
+        if role == "user":
+            prefix = "🧑 Du:"
+            color = "#4CAF50"
+        else:
+            prefix = "🤖 Claude:"
+            color = "#2196F3"
+        
+        # Formatierte Nachricht
+        formatted_msg = f"<div style='margin: 5px 0; padding: 8px; background-color: #333; border-left: 3px solid {color}; border-radius: 3px;'>"
+        formatted_msg += f"<b style='color: {color};'>[{timestamp}] {prefix}</b><br>"
+        formatted_msg += f"<span style='color: #ffffff;'>{message}</span>"
+        formatted_msg += "</div>"
+        
+        self.chat_display.append(formatted_msg)
+        
+        # Auto-scroll
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        self.chat_display.setTextCursor(cursor)
+
+    def clear_chat_display(self):
+        """Löscht Chat-Anzeige"""
+        self.chat_display.clear()
+
+    # Add new signals to StatusWindow
+    new_session_requested = QtCore.pyqtSignal()
+    save_session_requested = QtCore.pyqtSignal()
+    load_session_requested = QtCore.pyqtSignal()
+    export_chat_requested = QtCore.pyqtSignal()
+    clear_chat_requested = QtCore.pyqtSignal()
+    send_message_requested = QtCore.pyqtSignal(str)
+    stop_requested = QtCore.pyqtSignal() # New signal for stopping processes
+
+    def enable_send_button(self):
+        self.send_button.setEnabled(True)
+        self.input_field.setEnabled(True)
+
+    def disable_send_button(self):
+        self.send_button.setEnabled(False)
+        self.input_field.setEnabled(False)
+
+    def enable_stop_button(self):
+        self.stop_button.setEnabled(True)
+
+    def disable_stop_button(self):
+        self.stop_button.setEnabled(False)
+
+    def _on_clear_button_clicked(self):
+        """Handler for clear button click, emits clear_chat_requested signal."""
+        self.clear_chat_requested.emit()
+
+    def _on_send_button_clicked(self):
+        """Handler for send button click or Enter key press in input field."""
+        message = self.input_field.text().strip()
+        if message:
+            self.send_message_requested.emit(message)
+            self.input_field.clear() # Clear input field after sending
+
+    def keyPressEvent(self, event):
+        """Tastendruck-Event (Hauptfenster)"""
+        if event.key() == QtCore.Qt.Key_Alt and not event.isAutoRepeat():
+            self.alt_pressed = True
+        super().keyPressEvent(event) # Pass other key events to base class
+
+    def keyReleaseEvent(self, event):
+        """Tasten-Loslassen-Event (Hauptfenster)"""
+        if event.key() == QtCore.Qt.Key_Alt and not event.isAutoRepeat():
+            self.alt_pressed = False
+        super().keyReleaseEvent(event) # Pass other key events to base class
+
+    def set_input_text(self, text):
+        """Sets the text in the input field."""
+        self.input_field.setText(text)
+        self.input_field.setFocus() # Set focus to the input field after setting text
+        self.input_field.selectAll() # Select all text for easy editing/overwriting
