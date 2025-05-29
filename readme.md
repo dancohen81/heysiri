@@ -134,8 +134,9 @@ yarn build
 Danach starten Sie den Server:
 
 ```bash
-node dist/index.js
+node dist/index.js "D:/Users/stefa/heysiri"
 ```
+*(Hinweis: Der Fileman Server benötigt mindestens ein Verzeichnis, in dem er Operationen ausführen darf. Hier wird das Hauptverzeichnis der Voice Chat App als erlaubtes Verzeichnis angegeben. Sie können auch andere Pfade hinzufügen, z.B. `node dist/index.js "D:/Users/stefa/heysiri" "C:/Users/stefa/Dokumente"`)*
 
 Lassen Sie dieses Terminalfenster geöffnet, da der Server im Hintergrund laufen muss, damit die Voice Chat App mit ihm kommunizieren kann. Die App erwartet, dass der Server unter `http://localhost:3000/tool_use` erreichbar ist (konfiguriert in `config.py`).
 
