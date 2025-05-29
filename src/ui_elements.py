@@ -1,5 +1,52 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 import datetime
+import math
+
+class LoadingSpinner(QtWidgets.QWidget):
+    """Ein Lade-Spinner mit wandernden Punkten."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(50, 50) # Fixed size for the spinner
+        self.dot_count = 4
+        self.current_angle = 0
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.update_animation)
+        self.dot_radius = 4
+        self.spinner_radius = 15
+        self.animation_speed = 100 # ms per frame
+        self.hide() # Start hidden
+
+    def start_animation(self):
+        self.show()
+        self.timer.start(self.animation_speed)
+
+    def stop_animation(self):
+        self.timer.stop()
+        self.hide()
+        self.current_angle = 0 # Reset angle
+
+    def update_animation(self):
+        self.current_angle = (self.current_angle + 10) % 360 # Rotate by 10 degrees
+        self.update() # Request repaint
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        
+        painter.setBrush(QtGui.QColor("#0d7377")) # Dot color
+        painter.setPen(QtCore.Qt.NoPen)
+        
+        for i in range(self.dot_count):
+            angle_offset = (360 / self.dot_count) * i
+            angle_rad = math.radians(self.current_angle + angle_offset)
+            
+            x = center_x + self.spinner_radius * math.cos(angle_rad)
+            y = center_y + self.spinner_radius * math.sin(angle_rad)
+            
+            painter.drawEllipse(QtCore.QPointF(x, y), self.dot_radius, self.dot_radius)
 
 class StatusWindow(QtWidgets.QWidget):
     """Haupt-UI-Fenster der Anwendung"""
@@ -9,9 +56,12 @@ class StatusWindow(QtWidgets.QWidget):
         self.setWindowTitle("🎤 Voice Chat mit Claude")
         self.setWindowFlags(
             QtCore.Qt.WindowStaysOnTopHint | # Keep on top
-            QtCore.Qt.WindowMinimizeButtonHint # Keep minimize button
+            QtCore.Qt.WindowMinimizeButtonHint | # Keep minimize button
+            QtCore.Qt.WindowMaximizeButtonHint | # Keep maximize button
+            QtCore.Qt.WindowCloseButtonHint | # Keep close button
+            QtCore.Qt.WindowSystemMenuHint # Keep system menu
         )
-        self.setGeometry(100, 100, 500, 300) # Initial size, now resizable
+        self.setGeometry(100, 100, 800, 600) # Increased initial size, now resizable
         self.setup_ui()
         self.setup_keyboard()
         self.input_field.setFocus() # Set initial focus to the input field
@@ -55,21 +105,25 @@ class StatusWindow(QtWidgets.QWidget):
 
         layout = QtWidgets.QVBoxLayout()
         
-        # Status-Anzeige
+        # Status-Anzeige und Spinner in einem horizontalen Layout
+        status_layout = QtWidgets.QHBoxLayout()
         self.status_label = QtWidgets.QTextEdit("🟢 Bereit - Leertaste halten zum Sprechen")
         self.status_label.setReadOnly(True)
         self.status_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard)
-        self.status_label.setMinimumHeight(30) # Ensure minimum height
-        self.status_label.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff) # Hide scrollbar
-        self.status_label.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff) # Hide scrollbar
-        layout.addWidget(self.status_label)
+        self.status_label.setFixedHeight(50) # Fixed height for status bar
+        status_layout.addWidget(self.status_label)
+        
+        self.loading_spinner = LoadingSpinner(self)
+        status_layout.addWidget(self.loading_spinner)
+        
+        layout.addLayout(status_layout)
         
         # Chat-Verlauf
         chat_label = QtWidgets.QLabel("Chat-Verlauf:")
         layout.addWidget(chat_label)
         
         self.chat_display = QtWidgets.QTextEdit()
-        self.chat_display.setMaximumHeight(180)
+        # Removed setMaximumHeight to allow chat display to expand with window
         layout.addWidget(self.chat_display)
 
         # Input field for manual text entry
@@ -96,15 +150,15 @@ class StatusWindow(QtWidgets.QWidget):
         # Other Buttons
         button_layout = QtWidgets.QHBoxLayout()
         
-        self.new_session_btn = QtWidgets.QPushButton("✨ Neue Sitzung")
+        self.new_session_btn = QtWidgets.QPushButton("✨ Neu")
         self.new_session_btn.clicked.connect(self.new_session_requested)
         button_layout.addWidget(self.new_session_btn)
 
-        self.save_session_btn = QtWidgets.QPushButton("💾 Speichern unter...")
+        self.save_session_btn = QtWidgets.QPushButton("💾 Speichern...")
         self.save_session_btn.clicked.connect(self.save_session_requested)
         button_layout.addWidget(self.save_session_btn)
 
-        self.load_session_btn = QtWidgets.QPushButton(" Sitzung laden...")
+        self.load_session_btn = QtWidgets.QPushButton("📂 Laden...")
         self.load_session_btn.clicked.connect(self.load_session_requested)
         button_layout.addWidget(self.load_session_btn)
 
@@ -116,13 +170,14 @@ class StatusWindow(QtWidgets.QWidget):
         self.clear_btn.clicked.connect(self._on_clear_button_clicked) # Connect to new handler method
         button_layout.addWidget(self.clear_btn)
         
-        self.minimize_btn = QtWidgets.QPushButton("📱 Minimieren")
-        self.minimize_btn.clicked.connect(self.hide)
-        button_layout.addWidget(self.minimize_btn)
+        # Removed minimize and close buttons as per user request
+        # self.minimize_btn = QtWidgets.QPushButton("📱 Minimieren")
+        # self.minimize_btn.clicked.connect(self.hide)
+        # button_layout.addWidget(self.minimize_btn)
         
-        self.close_btn = QtWidgets.QPushButton("❌ Schliessen")
-        self.close_btn.clicked.connect(QtWidgets.qApp.quit)
-        button_layout.addWidget(self.close_btn)
+        # self.close_btn = QtWidgets.QPushButton("❌ Schliessen")
+        # self.close_btn.clicked.connect(QtWidgets.qApp.quit)
+        # button_layout.addWidget(self.close_btn)
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
@@ -158,6 +213,12 @@ class StatusWindow(QtWidgets.QWidget):
         
         # For QTextEdit, use setHtml or setPlainText and then set alignment
         self.status_label.setHtml(f"<div align='center'>{text}</div>")
+        
+        # Control spinner based on status color
+        if color == "blue":
+            self.loading_spinner.start_animation()
+        else:
+            self.loading_spinner.stop_animation()
 
     def add_chat_message(self, role, message):
         """Fügt Nachricht zum Chat-Display hinzu"""
