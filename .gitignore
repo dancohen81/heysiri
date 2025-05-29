@@ -30,3 +30,4 @@ claude_response*.mp3 # Wildcard for generated audio files
 temp_aufnahme.wav
 .env
 voice-chat-project/
+chat_history.json
