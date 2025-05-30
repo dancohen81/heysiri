@@ -10,6 +10,8 @@ import datetime
 from PyQt5 import QtWidgets, QtGui, QtCore
 import sys
 import requests
+import uuid # NEW: Import uuid for unique filenames
+from pydub import AudioSegment # NEW: Import AudioSegment
 
 from src.config import (
     SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL,
@@ -24,6 +26,7 @@ from src.session_manager import ChatSessionManager
 from src.audio_recorder import AudioRecorder
 from src.mcp_client import MCPManager
 from src.settings_window import SettingsWindow # NEU: Import SettingsWindow
+from src.dsp_processor import parse_dsp_commands, _apply_effects_to_segment # NEU: Import DSP functions
 
 class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     """Hauptanwendung mit System Tray Integration"""
@@ -397,7 +400,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         similarity_boost_input = QtWidgets.QDoubleSpinBox()
         similarity_boost_input.setRange(0.0, 1.0)
         similarity_boost_input.setSingleStep(0.01)
-        similarity_boost_input.setValue(ELEVENLABS_SIMILARITY_BOOST)
+        similarity_input.setValue(ELEVENLABS_SIMILARITY_BOOST)
         layout.addRow(similarity_boost_label, similarity_boost_input)
 
         # Style
@@ -742,12 +745,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             else:
                 # Normale Antwort ohne Tool-Verwendung
                 if response["text"]:
-                    self._handle_llm_response(response["text"]) # Umbenannt von _handle_claude_response
+                    await self._handle_llm_response(response["text"]) # Umbenannt von _handle_claude_response
                 else:
                     self.status_update_signal.emit("❌ Leere Antwort vom LLM", "red")
 
         except Exception as e:
-            self.status_update_signal.emit(f"LLM Fehler: {e}", "red")
+            self.status_update_signal.emit(f"LLM Verarbeitungsfehler: {e}", "red")
             print(f"❌ LLM Fehler Details: {e}")
         finally:
             self.window.enable_send_button()
@@ -826,7 +829,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         # Finale Antwort verarbeiten (Text oder Abschlussmeldung)
         if current_response["text"]:
-            self._handle_llm_response(current_response["text"]) # Umbenannt von _handle_claude_response
+            await self._handle_llm_response(current_response["text"]) # Umbenannt von _handle_claude_response
         else:
             self.status_update_signal.emit("✅ Alle Tool-Aktionen abgeschlossen.", "green")
             print("DEBUG: Alle Tool-Aktionen abgeschlossen, keine Textantwort.")
@@ -837,7 +840,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         print("DEBUG: _execute_tool_calls beendet.")
 
-    def _handle_llm_response(self, llm_text): # Umbenannt von _handle_claude_response
+    async def _handle_llm_response(self, llm_text): # Umbenannt von _handle_claude_response
         """Verarbeitet LLM-Antwort (Text-Ausgabe + TTS)"""
         try:
             if self.stop_flag.is_set():
@@ -869,12 +872,77 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 try:
                     if self.stop_flag.is_set():
                         return
-                    print(f"DEBUG: LLM Text vor TTS: '{llm_text}'") # ADDED DEBUG PRINT
-                    audio_file = self.tts.text_to_speech(llm_text)
-                    if self.stop_flag.is_set():
-                        return
+                    
+                    # Parse the AI response text into segments with commands
+                    text_segments_info = parse_dsp_commands(llm_text)
+                    print(f"DEBUG: Parsed text segments info: {text_segments_info}") # ADDED DEBUG PRINT
+                    
+                    processed_audio_segments = []
+                    has_dsp_effects = False
+
+                    for i, segment_info in enumerate(text_segments_info):
+                        segment_text = segment_info["text"]
+                        segment_commands = segment_info["commands"]
+                        print(f"DEBUG: Processing segment {i} - Text: '{segment_text[:50]}...', Commands: {segment_commands}")
+
+                        audio_segment = AudioSegment.empty()
+                        original_audio_duration_ms = 0 # Store original duration
+
+                        if segment_text:
+                            self.status_update_signal.emit(f"🔊 Generiere Sprache für Segment: '{segment_text[:50]}...' ", "blue")
+                            audio_file_path_for_segment = self.tts.text_to_speech(segment_text)
+                            if self.stop_flag.is_set(): return
+                            audio_segment = AudioSegment.from_file(audio_file_path_for_segment)
+                            original_audio_duration_ms = audio_segment.duration_seconds * 1000
+                        
+                        processed_segment = audio_segment # Default to original audio
+
+                        # Check if this segment has echo or reverb commands
+                        has_time_domain_effect = any(cmd.startswith("!echo:") or cmd.startswith("!hall:") for cmd in segment_commands)
+
+                        if segment_commands:
+                            processed_segment = _apply_effects_to_segment(audio_segment, segment_commands)
+                            has_dsp_effects = True
+                        
+                        # Now, handle trimming the echo tail if the next segment doesn't have a time-domain effect
+                        if has_time_domain_effect:
+                            # Check the next segment
+                            next_segment_has_time_domain_effect = False
+                            if i + 1 < len(text_segments_info):
+                                next_segment_commands = text_segments_info[i+1]["commands"]
+                                next_segment_has_time_domain_effect = any(cmd.startswith("!echo:") or cmd.startswith("!hall:") for cmd in next_segment_commands)
+                            
+                            if not next_segment_has_time_domain_effect:
+                                # If the next segment does NOT have a time-domain effect,
+                                # trim the current processed_segment back to its original duration
+                                # or fade it out to ensure the echo doesn't bleed.
+                                # Trimming is simpler for now.
+                                if processed_segment.duration_seconds * 1000 > original_audio_duration_ms:
+                                    processed_segment = processed_segment[:original_audio_duration_ms]
+                                    # Optionally, add a short fade out to avoid clicks
+                                    # processed_segment = processed_segment.fade_out(50) # Fade out last 50ms
+                        
+                        processed_audio_segments.append(processed_segment)
+                    
+                    # Concatenate all processed segments
+                    final_processed_audio = AudioSegment.empty()
+                    for segment in processed_audio_segments:
+                        final_processed_audio += segment
+
+                    # Save the final processed audio to a temporary file
+                    output_dir = "temp_audio"
+                    os.makedirs(output_dir, exist_ok=True)
+                    temp_output_path = os.path.join(output_dir, f"dsp_final_{uuid.uuid4()}.wav")
+                    
+                    final_processed_audio.export(temp_output_path, format="wav")
+                    
+                    audio_to_play = temp_output_path
+
+                    if has_dsp_effects:
+                        self.status_update_signal.emit("✅ DSP-Verarbeitung abgeschlossen.", "green")
+
                     self.window.enable_pause_button() # Enable pause button when audio starts
-                    play_audio_file(audio_file, self.stop_flag, self.pause_flag)
+                    play_audio_file(audio_to_play, self.stop_flag, self.pause_flag)
                     self.window.disable_pause_button() # Disable pause button when audio finishes
                     self.status_update_signal.emit("✅ Gespräch abgeschlossen", "green")
                 except Exception as e:

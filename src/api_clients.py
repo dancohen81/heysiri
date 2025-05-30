@@ -260,22 +260,30 @@ class OpenRouterAPI:
         except Exception as e:
             raise Exception(f"OpenRouter Tool-Nachricht Fehler: {e}")
 
-import re # Re-import re
+import re
+import time # Import time for timestamp
+import glob # Import glob for file cleanup
+import tempfile # Import tempfile for fallback
 
 def parse_voice_commands_for_speed_param(text):
     """
-    Parses voice commands from the beginning of the text to determine speed.
+    Parses voice commands from the text to determine speed and remove them.
     Returns (cleaned_text, speed_multiplier).
     """
     speed_multiplier = 1.0 # Default normal speed
-    cleaned_text = text
+    temp_text = text # Use a temporary variable for iterative cleaning
 
-    if text.startswith("!schnell:"):
-        cleaned_text = text.replace("!schnell:", "").strip()
-        speed_multiplier = 1.2 # Max speed according to docs
-    elif text.startswith("!langsam:"):
-        cleaned_text = text.replace("!langsam:", "").strip()
-        speed_multiplier = 0.7 # Min speed according to docs
+    # Process !schnell: first, as it might be overridden by !langsam:
+    if re.search(r"!schnell:\s*", temp_text):
+        temp_text = re.sub(r"!schnell:\s*", "", temp_text)
+        speed_multiplier = 1.2
+
+    # Process !langsam: (this will override !schnell: if both are present)
+    if re.search(r"!langsam:\s*", temp_text):
+        temp_text = re.sub(r"!langsam:\s*", "", temp_text)
+        speed_multiplier = 0.7
+    
+    cleaned_text = temp_text.strip() # Strip only once at the end
     
     print(f"DEBUG: Parsed for speed param: Text='{cleaned_text[:50]}...', Speed={speed_multiplier}")
     return cleaned_text, speed_multiplier
@@ -291,26 +299,20 @@ class ElevenLabsTTS:
     def text_to_speech(self, original_text, output_file=None):
         """Konvertiert Text zu Sprache"""
         # Parse voice commands to get speed multiplier and cleaned text
+        # Note: This function now expects original_text to be a segment,
+        # so speed commands should be at the beginning of the segment if present.
         text_to_send, speed_multiplier = parse_voice_commands_for_speed_param(original_text)
 
         # Eindeutigen Dateinamen generieren
         if output_file is None:
-            import time
             timestamp = int(time.time() * 1000)
             output_file = f"claude_response_{timestamp}.mp3"
         
-        # Alte Dateien aufräumen
-        try:
-            import glob
-            old_files = glob.glob("claude_response_*.mp3")
-            for old_file in old_files:
-                try:
-                    if os.path.exists(old_file):
-                        os.remove(old_file)
-                except:
-                    pass
-        except:
-            pass
+        # Alte Dateien aufräumen (only if not a temp file from previous segment)
+        # This cleanup logic should ideally be handled by the caller (app_logic)
+        # or a dedicated cleanup function, not here for every segment.
+        # For now, let's keep it simple and assume temp files are managed.
+        # Removed glob cleanup from here to avoid issues with concurrent segment processing.
         
         headers = {
             "xi-api-key": self.api_key,
@@ -342,7 +344,6 @@ class ElevenLabsTTS:
                 return output_file
             except PermissionError:
                 # Fallback: Temp-Verzeichnis verwenden
-                import tempfile
                 temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
                 temp_file.write(response.content)
                 temp_file.close()

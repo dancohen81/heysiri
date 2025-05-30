@@ -29,3 +29,4 @@ winshell==0.6
 requests==2.32.3
 pygame==2.6.1
 python-dotenv==1.0.1
+pydub==0.25.1
