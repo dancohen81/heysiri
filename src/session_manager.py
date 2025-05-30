@@ -12,6 +12,7 @@ class ChatSessionManager:
         self.status_update_signal = status_update_signal
         self.chat_message_signal = chat_message_signal
         self.current_session_name = self.chat_history.session_name
+        self.editing_message_id = None # NEW: To store the ID of the message being edited
 
     def _generate_session_title_with_ai(self, messages):
         """Generiert einen Sitzungstitel basierend auf dem Chat-Verlauf mit dem aktiven LLM."""
@@ -71,10 +72,25 @@ Beispiele:
 
     def load_existing_chat(self):
         """Lädt den Chat-Verlauf der aktuellen Sitzung in die UI."""
-        self.window.clear_chat_display() # Clear display before loading
-        for msg in self.chat_history.messages:
-            self.window.add_chat_message(msg["role"], msg["content"])
+        print(f"DEBUG: load_existing_chat called for session '{self.current_session_name}'")
+        self.window.clear_chat_display() # Ensure display is cleared before reloading
+        
+        # Get all messages from the current session's history
+        all_messages_in_session = list(self.chat_history.messages.values())
+        
+        # Sort all messages by timestamp to display them chronologically
+        sorted_messages = sorted(all_messages_in_session, key=lambda x: x['timestamp'])
+        
+        print(f"DEBUG: load_existing_chat lädt {len(sorted_messages)} Nachrichten.")
+        for msg in sorted_messages:
+            self.window.add_chat_message(msg["role"], msg["content"], msg["id"]) # Pass message ID
         self.status_update_signal.emit(f"Sitzung '{self.current_session_name}' geladen", "green")
+
+    def edit_chat_message_from_ui(self, message_id, original_content):
+        """Bereitet eine Nachricht zur Bearbeitung vor, indem der Inhalt in das Eingabefeld geladen wird."""
+        self.editing_message_id = message_id # Store the ID of the message being edited
+        self.window.set_input_text(original_content) # Pre-fill input field with original message content
+        self.status_update_signal.emit(f"Nachricht zur Bearbeitung geladen. Bearbeiten und erneut senden.", "yellow")
 
     def new_chat_session(self):
         """Startet eine neue, leere Chat-Sitzung."""

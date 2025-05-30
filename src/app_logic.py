@@ -33,7 +33,8 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     
     # Define signals for thread-safe UI updates as class attributes
     status_update_signal = QtCore.pyqtSignal(str, str)
-    chat_message_signal = QtCore.pyqtSignal(str, str)
+    chat_message_signal = QtCore.pyqtSignal(str, str, str) # role, content, message_id
+    send_branch_heads_to_ui_signal = QtCore.pyqtSignal(dict) # New signal to send branch heads to the UI
 
     def __init__(self, app):
         # Icons erstellen
@@ -54,31 +55,36 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.mcp_manager = MCPManager()
         self.mcp_ready = False
         
-        # UI Setup
-        self.window = StatusWindow()
-        self.window.send_message_requested.connect(self.send_message_to_claude)
-        self.window.show()
-        
-        # Initialize MCP client (optional, if needed for persistent connection)
-        self.fileman_mcp_url = FILEMAN_MCP_URL
-
-        # Connect signals to StatusWindow slots
-        self.status_update_signal.connect(self.window.set_status)
-        self.chat_message_signal.connect(self.window.add_chat_message)
-        self.window.stop_requested.connect(self.stop_processing_from_ui)
-        self.window.pause_audio_requested.connect(self.toggle_audio_playback) # Connect new signal
-
-        # Initialize ChatSessionManager
+        # Initialize ChatHistory and SessionManager first
         self.chat_history = ChatHistory("default")
         self.session_manager = ChatSessionManager(
             self.chat_history, 
             self.llm_api, # Pass the active LLM API
-            self.window, 
+            None, # Pass None for window initially, set later
             self.status_update_signal, 
             self.chat_message_signal
         )
+
+        # UI Setup
+        self.window = StatusWindow()
+        # Now that session_manager is initialized, connect signals
+        self.window.send_message_requested.connect(self.send_message_to_claude)
+        self.window.edit_message_requested.connect(self.session_manager.edit_chat_message_from_ui)
+        self.window.show_branches_requested.connect(self._on_show_branches_requested)
+        self.window.branch_selected_from_ui.connect(self._on_branch_selected_from_ui)
+        self.window.show()
         
-        # Connect session management signals
+        # Update session manager with the window instance
+        self.session_manager.window = self.window
+
+        # Connect signals to StatusWindow slots (moved here to ensure window is fully set up)
+        self.status_update_signal.connect(self.window.set_status)
+        self.chat_message_signal.connect(self.window.add_chat_message)
+        self.send_branch_heads_to_ui_signal.connect(self.window.show_branch_selection_dialog)
+        self.window.stop_requested.connect(self.stop_processing_from_ui)
+        self.window.pause_audio_requested.connect(self.toggle_audio_playback)
+        
+        # Connect session management signals (moved here to ensure session_manager and window are fully initialized)
         self.window.new_session_requested.connect(self.session_manager.new_chat_session)
         self.window.save_session_requested.connect(self.session_manager.save_chat_session_as)
         self.window.load_session_requested.connect(self.session_manager.load_chat_session)
@@ -93,24 +99,19 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         # Setup Tray Menu
         self.setup_tray_menu()
 
-        # Timer für Tastatur-Polling
-        self.timer = QtCore.QTimer()
-        self.timer.timeout.connect(self.audio_recorder.check_keyboard)
-        self.timer.start(50)  # 50ms = 20 FPS
+        # Initialize MCP client (optional, if needed for persistent connection)
+        self.fileman_mcp_url = FILEMAN_MCP_URL
 
-        # Signals
-        self.activated.connect(self.tray_icon_clicked)
-
-        # Chat-Verlauf laden
-        self.session_manager.load_existing_chat()
-        self.window.set_chat_title(self.session_manager.current_session_name) # Update chat title on load
-        
         # Initialize stop and pause flags for managing threads
         self.stop_flag = threading.Event()
         self.pause_flag = threading.Event() # New pause flag
         
         # MCP asynchron starten (NEU)
         self.setup_mcp_async()
+
+        # Chat-Verlauf laden and start keyboard polling (delayed to ensure UI is ready)
+        # Schedule _post_init_setup to run after the event loop has processed initial UI events
+        QtCore.QTimer.singleShot(0, self._post_init_setup)
 
     def setup_mcp_async(self):
         """Startet MCP Client asynchron"""
@@ -121,25 +122,41 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 success = loop.run_until_complete(self.mcp_manager.setup())
                 self.mcp_ready = success
                 if success:
-                    self.status_update_signal.emit("✅ MCP Filesystem bereit", "green")
                     tools = self.mcp_manager.get_tools_for_claude()
                     print(f"📁 Verfügbare MCP Tools: {[tool['name'] for tool in tools]}")
-                    # NEU: Tray-Status aktualisieren
-                    if hasattr(self, 'mcp_status_action'):
-                        self.mcp_status_action.setText(f"🔧 ✅ MCP bereit ({len(tools)} Tools)")
                 else:
-                    self.status_update_signal.emit("⚠️ MCP Filesystem nicht verfügbar", "yellow")
-                    # NEU: Tray-Status aktualisieren  
-                    if hasattr(self, 'mcp_status_action'):
-                        self.mcp_status_action.setText("🔧 ❌ MCP nicht verfügbar")
+                    print(f"❌ MCP Setup Fehler: MCP nicht verfügbar")
                 loop.close()
             except Exception as e:
                 print(f"❌ MCP Setup Fehler: {e}")
-                self.status_update_signal.emit("❌ MCP Setup fehlgeschlagen", "red")
                 self.mcp_ready = False
         
         # Starte in separatem Thread
         threading.Thread(target=run_async_setup, daemon=True).start()
+
+    def _post_init_setup(self):
+        """Performs setup that requires the UI to be fully initialized."""
+        # Emit initial status messages here, after UI is ready
+        if self.mcp_ready:
+            tools = self.mcp_manager.get_tools_for_claude()
+            self.status_update_signal.emit(f"✅ MCP Filesystem bereit ({len(tools)} Tools)", "green")
+        else:
+            self.status_update_signal.emit("⚠️ MCP Filesystem nicht verfügbar", "yellow")
+
+        # Ensure chat_display exists before clearing
+        if hasattr(self.window, 'chat_display') and self.window.chat_display is not None:
+            self.window.clear_chat_display() # Clear display before loading new chat
+        
+        self.session_manager.load_existing_chat()
+        self.window.set_chat_title(self.session_manager.current_session_name) # Update chat title on load
+
+        # Start Timer für Tastatur-Polling (moved here)
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.audio_recorder.check_keyboard)
+        self.timer.start(50)  # 50ms = 20 FPS
+
+        # Signals (moved here if they depend on fully initialized UI)
+        self.activated.connect(self.tray_icon_clicked)
 
     def create_icon(self, emoji, color):
         """Erstellt ein Icon mit Emoji"""
@@ -629,6 +646,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
     def send_message_to_claude(self, user_text):
         """Sendet die Benutzer-Nachricht an Claude mit MCP Tool Support."""
+        print(f"DEBUG: send_message_to_claude called with text: '{user_text}'")
         self.stop_flag.clear()
         if not user_text.strip():
             self.status_update_signal.emit("Nachricht ist leer, wird nicht gesendet.", "yellow")
@@ -636,9 +654,46 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             self.window.disable_stop_button()
             return
 
-        # User-Nachricht zu Chat hinzufügen
-        self.chat_message_signal.emit("user", user_text)
-        self.chat_history.add_message("user", user_text)
+        message_id = None
+        if self.session_manager.editing_message_id:
+            print(f"DEBUG: Bearbeitete Nachricht erkannt. Original ID: {self.session_manager.editing_message_id}")
+            # This is an edited message, create a new branch from the original's parent
+            original_message_id = self.session_manager.editing_message_id
+            original_message = self.chat_history.messages.get(original_message_id)
+            
+            if original_message:
+                # Get the parent_id of the original message. If it doesn't exist, it's a root message.
+                parent_for_new_branch = original_message.get('parent_id')
+                
+                # Temporarily set current_branch_head_id to the parent of the original message
+                # so that add_message creates the new message as a sibling/new branch.
+                # Store the original current_branch_head_id to restore it later.
+                original_current_branch_head_id = self.chat_history.current_branch_head_id
+                self.chat_history.current_branch_head_id = parent_for_new_branch
+                
+                message_id = self.chat_history.add_message("user", user_text)
+                
+                # Set the current branch head to the newly added edited message
+                self.chat_history.current_branch_head_id = message_id
+                
+                self.status_update_signal.emit("Nachricht bearbeitet und als neuen Branch gesendet.", "green")
+            else:
+                self.status_update_signal.emit("Fehler: Originalnachricht zur Bearbeitung nicht gefunden.", "red")
+                # Fallback to normal add if original not found
+                message_id = self.chat_history.add_message("user", user_text)
+                # If fallback, ensure current_branch_head_id is set to the new message
+                self.chat_history.current_branch_head_id = message_id
+            
+            self.session_manager.editing_message_id = None # Reset editing state
+            print("DEBUG: Lade Chat-Verlauf nach Bearbeitung neu.")
+            self.session_manager.load_existing_chat() # Reload chat to show the new branch
+            
+        else:
+            print("DEBUG: Neue Nachricht erkannt.")
+            # Normal new message
+            message_id = self.chat_history.add_message("user", user_text)
+            self.status_update_signal.emit("Nachricht gesendet.", "green")
+            self.chat_message_signal.emit("user", user_text, message_id) # Only emit for new messages
 
         if not self.llm_api:
             self.status_update_signal.emit("Kein LLM API verfügbar", "red")
@@ -711,6 +766,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
             # Erste LLM-Anfrage mit dynamischem System Prompt
             response = None
+            
+            print(f"DEBUG: Sende folgende Nachrichten an LLM: {context_messages}")
+            print(f"DEBUG: Mit System Prompt: {system_prompt}")
+
             if tools:
                 print(f"🤖 DEBUG: Sende {len(tools)} Tools an {self.llm_api.__class__.__name__}")
                 response = self.llm_api.send_message_with_tools(context_messages, tools, system_prompt=system_prompt)
@@ -842,18 +901,20 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
     async def _handle_llm_response(self, llm_text): # Umbenannt von _handle_claude_response
         """Verarbeitet LLM-Antwort (Text-Ausgabe + TTS)"""
+        print(f"DEBUG: _handle_llm_response called with text: '{llm_text[:50]}...'")
         try:
             if self.stop_flag.is_set():
                 return
 
             # LLM-Antwort anzeigen und speichern
-            self.chat_message_signal.emit("assistant", llm_text)
-            self.chat_history.add_message("assistant", llm_text)
+            message_id = self.chat_history.add_message("assistant", llm_text)
+            self.chat_message_signal.emit("assistant", llm_text, message_id)
 
             # NEU: Titel generieren, wenn noch "default" und genug Nachrichten
             if self.session_manager.current_session_name == "default" and self.chat_history.get_message_count() >= 2:
                 def generate_title_and_update():
-                    generated_title = self.session_manager._generate_session_title_with_ai(self.chat_history.messages)
+                    # Pass the current branch messages for title generation
+                    generated_title = self.session_manager._generate_session_title_with_ai(self.chat_history.get_current_branch_messages())
                     if generated_title:
                         self.session_manager.current_session_name = generated_title
                         self.chat_history.session_name = generated_title # Update ChatHistory instance
@@ -888,12 +949,15 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         audio_segment = AudioSegment.empty()
                         original_audio_duration_ms = 0 # Store original duration
 
-                        if segment_text:
+                        if segment_text.strip(): # Ensure segment_text is not just empty or whitespace
                             self.status_update_signal.emit(f"🔊 Generiere Sprache für Segment: '{segment_text[:50]}...' ", "blue")
                             audio_file_path_for_segment = self.tts.text_to_speech(segment_text)
                             if self.stop_flag.is_set(): return
                             audio_segment = AudioSegment.from_file(audio_file_path_for_segment)
                             original_audio_duration_ms = audio_segment.duration_seconds * 1000
+                        else:
+                            print(f"DEBUG: Segment text is empty or only whitespace after command parsing. Skipping TTS for this segment.")
+                            continue # Skip TTS if there's no actual text to speak
                         
                         processed_segment = audio_segment # Default to original audio
 
@@ -983,6 +1047,22 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.status_update_signal.emit("⏸️ Audio pausiert.", "yellow")
         else:
             self.status_update_signal.emit("Kein Audio zum Pausieren/Fortsetzen.", "yellow")
+
+    def _on_show_branches_requested(self):
+        """Slot to handle request for showing chat branches."""
+        self.status_update_signal.emit("Lade Chat-Branches...", "blue")
+        # Get branch heads from chat_history
+        branch_heads = self.chat_history.get_all_branch_heads()
+        self.send_branch_heads_to_ui_signal.emit(branch_heads)
+        self.status_update_signal.emit("Chat-Branches geladen.", "green")
+
+    def _on_branch_selected_from_ui(self, message_id: str):
+        """Slot to handle selection of a branch from the UI."""
+        self.status_update_signal.emit(f"Wechsle zu Branch: {message_id[:8]}...", "blue")
+        self.chat_history.set_current_branch(message_id) # Set the new branch head
+        self.window.clear_chat_display() # Clear current display
+        self.session_manager.load_existing_chat() # Reload chat for the new branch
+        self.status_update_signal.emit("Branch gewechselt.", "green")
 
 
     def force_file_operation_prompt(self, operation_type, details):

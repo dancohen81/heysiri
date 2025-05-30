@@ -12,36 +12,33 @@ def _split_text_by_commands(text: str):
     Each segment is a dictionary with 'text' and 'commands'.
     Commands apply to the text segment that follows them.
     """
-    # Regex to find commands anywhere in the string
-    # Example: !echo: !hall: This is text !pitch+: more text
     command_pattern = re.compile(r"(!(?:echo|hall|pitch[+-]?|lowpass|highpass|normal):)\s*")
     
     segments = []
-    last_idx = 0
+    current_text_buffer = []
     current_commands = []
 
-    # Find all command occurrences
-    matches = list(command_pattern.finditer(text))
-
-    for match in matches:
-        cmd_start = match.start()
-        cmd_end = match.end()
-        cmd = match.group(1)
-
-        # If there's text before this command, it belongs to the previous segment's commands
-        if cmd_start > last_idx:
-            segment_text = text[last_idx:cmd_start].strip()
-            if segment_text:
-                segments.append({"text": segment_text, "commands": list(current_commands)})
-            current_commands = [] # Reset commands for the new segment
-        
-        current_commands.append(cmd)
-        last_idx = cmd_end
+    # Split the text by commands, keeping the commands in the result
+    parts = command_pattern.split(text)
     
-    # Add the last segment
-    remaining_text = text[last_idx:].strip()
-    if remaining_text or current_commands: # Even if no text, if there are commands, they apply to an empty segment
-        segments.append({"text": remaining_text, "commands": list(current_commands)})
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+
+        # Check if the part is a command (by trying to match the full part against the command pattern)
+        if command_pattern.fullmatch(part.strip()):
+            # If there's buffered text, add it as a segment
+            if current_text_buffer:
+                segments.append({"text": "".join(current_text_buffer).strip(), "commands": list(current_commands)})
+                current_text_buffer = []
+                current_commands = [] # Reset commands for the new segment
+            current_commands.append(part.strip()) # Add the command to the current commands list
+        else: # It's text
+            current_text_buffer.append(part)
+    
+    # Add any remaining buffered text and commands
+    if current_text_buffer or current_commands:
+        segments.append({"text": "".join(current_text_buffer).strip(), "commands": list(current_commands)})
     
     return segments
 
