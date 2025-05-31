@@ -49,7 +49,6 @@ Das Setup-Skript erstellt automatisch:
 - Virtuelle Python-Umgebung (`venv/`)
 - Installation aller Abhängigkeiten
 - Überprüfung der Installation
-- **Startet und initialisiert die benötigten MCP Server (Dateisystem und Internet) automatisch.**
 
 ### Schritt 3: API Keys einrichten
 
@@ -93,8 +92,12 @@ set ELEVENLABS_API_KEY=dein_elevenlabs_key_hier
 ### Schritt 5: App starten
 
 ```cmd
-call venv\Scripts\activate.bat
-python src/main.py
+start.bat
+```
+
+Alternativ (wenn `start.bat` nicht verwendet wird):
+```cmd
+uv run python -m src.main
 ```
 
 ## 🎯 Verwendung
@@ -114,6 +117,7 @@ python src/main.py
 
 ### Tastenkombinationen
 - **F3 drücken:** Aufnahme starten/stoppen
+- **F4 drücken:** Aufnahme abbrechen (während der Aufnahme)
 - **ESC:** Fenster schließen (App läuft im Tray weiter)
 
 ## 🔧 Konfiguration
@@ -183,7 +187,7 @@ pip install pygame
 ## 📁 Projektstruktur
 
 ```
-voice-chat-app/
+.
 ├── src/                   # Haupt-Source-Code
 │   ├── api_clients.py
 │   ├── app_logic.py
@@ -204,7 +208,7 @@ voice-chat-app/
 ├── README.md             # Diese Anleitung
 ├── chat_history.json     # Chat-Verlauf (wird erstellt)
 ├── venv/                 # Virtuelle Umgebung (wird erstellt)
-└── temp_aufnahme.wav     # Temporäre Audio-Datei
+└── temp_audio/           # Temporäre Audio-Dateien
 ```
 
 ## 🔒 Datenschutz & Sicherheit
