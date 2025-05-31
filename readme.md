@@ -16,8 +16,8 @@ Eine erweiterte Sprachaufzeichnungs-App, die es ermöglicht, per Sprache mit Cla
 
 ## 📋 Workflow
 
-1. **Leertaste halten** → Audio wird aufgenommen
-2. **Loslassen** → Whisper transkribiert zu Text  
+1. **F3 gedrückt halten** → Audio wird aufgenommen (mind. 1 Sekunde halten)
+2. **F3 loslassen** → Whisper transkribiert zu Text  
 3. **Automatisch** → Text wird an Claude gesendet
 4. **Antwort** → Claude antwortet im Chat-Fenster
 5. **Optional** → ElevenLabs wandelt Antwort in Sprache um
@@ -104,8 +104,8 @@ uv run python -m src.main
 
 ### Erste Schritte
 1. Nach dem Start erscheint ein kleines Fenster und ein Icon im System Tray
-2. **Leertaste gedrückt halten** um zu sprechen
-3. **Loslassen** um die Aufnahme zu beenden
+2. **F3 gedrückt halten** um zu sprechen (mind. 1 Sekunde halten)
+3. **F3 loslassen** um die Aufnahme zu beenden
 4. Warten bis Claude antwortet
 5. Optional wird die Antwort vorgelesen
 
