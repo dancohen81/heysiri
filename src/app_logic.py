@@ -34,7 +34,6 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     # Define signals for thread-safe UI updates as class attributes
     status_update_signal = QtCore.pyqtSignal(str, str)
     chat_message_signal = QtCore.pyqtSignal(str, str, str) # role, content, message_id
-    send_branch_heads_to_ui_signal = QtCore.pyqtSignal(dict) # New signal to send branch heads to the UI
     refresh_chat_display_signal = QtCore.pyqtSignal() # NEW: Signal to refresh chat display
 
     def __init__(self, app):
@@ -76,15 +75,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         # UI Setup
         self.window.send_message_requested.connect(self.send_message_to_claude)
         self.window.edit_message_requested.connect(self._on_edit_message_requested) # Connect to new handler
-        self.window.show_branches_requested.connect(self._on_show_branches_requested)
-        self.window.branch_selected_from_ui.connect(self._on_branch_selected_from_ui)
         self.window.show()
         
         # Connect signals to StatusWindow slots (moved here to ensure window is fully set up)
         self.status_update_signal.connect(self.window.set_status)
         self.refresh_chat_display_signal.connect(self._refresh_chat_display) # NEW: Connect refresh signal
         # self.chat_message_signal.connect(self.window.add_chat_message) # Removed, now handled by _refresh_chat_display
-        self.send_branch_heads_to_ui_signal.connect(self.window.show_branch_selection_dialog)
         self.window.stop_requested.connect(self.stop_processing_from_ui)
         self.window.pause_audio_requested.connect(self.toggle_audio_playback)
         
@@ -94,10 +90,6 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.window.load_session_requested.connect(self.session_manager.load_chat_session)
         self.window.export_chat_requested.connect(self.session_manager.export_chat_history)
         self.window.clear_chat_requested.connect(self.session_manager.clear_current_chat_session)
-
-        # Connect new branch_icon_clicked signal from ChatDisplay
-        if self.window.chat_display:
-            self.window.chat_display.branch_icon_clicked.connect(self._on_branch_selected_from_ui)
 
         # Initialize AudioRecorder
         self.audio_recorder = AudioRecorder(self.window)
@@ -974,7 +966,9 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         print("DEBUG: _execute_tool_calls beendet.")
 
-    async def _handle_llm_response(self, llm_text): # Umbenannt von _handle_claude_response
+    # In app_logic.py - Ersetze die _handle_llm_response Methode
+
+    async def _handle_llm_response(self, llm_text):
         """Verarbeitet LLM-Antwort (Text-Ausgabe + TTS)"""
         print(f"DEBUG: _handle_llm_response called with text: '{llm_text[:50]}...'")
         try:
@@ -999,21 +993,21 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         self.status_update_signal.emit(f"Titel generiert: '{generated_title}'", "green")
                     else:
                         self.status_update_signal.emit("Titelgenerierung fehlgeschlagen.", "yellow")
-                
+
                 # Führe Titelgenerierung in einem separaten Thread aus, um UI nicht zu blockieren
                 threading.Thread(target=generate_title_and_update, daemon=True).start()
-            
+
             # Text-to-Speech (optional)
             if self.tts:
                 self.status_update_signal.emit("🔊 Generiere Sprache mit ElevenLabs...", "blue")
                 try:
                     if self.stop_flag.is_set():
                         return
-                    
+
                     # Parse the AI response text into segments with commands
                     text_segments_info = parse_dsp_commands(llm_text)
-                    print(f"DEBUG: Parsed text segments info: {text_segments_info}") # ADDED DEBUG PRINT
-                    
+                    print(f"DEBUG: Parsed text segments info: {text_segments_info}")
+
                     processed_audio_segments = []
                     has_dsp_effects = False
 
@@ -1037,16 +1031,23 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         else:
                             print(f"DEBUG: Cleaned segment text is empty or only whitespace. Skipping TTS for this segment.")
                             continue # Skip TTS if there's no actual text to speak
-                        
+
                         processed_segment = audio_segment # Default to original audio
 
                         # Check if this segment has echo or reverb commands
                         has_time_domain_effect = any(cmd.startswith("!echo:") or cmd.startswith("!hall:") for cmd in segment_commands)
 
-                        # if segment_commands: # Temporarily disable DSP effects for debugging
-                        #     processed_segment = _apply_effects_to_segment(audio_segment, segment_commands)
-                        #     has_dsp_effects = True
-                        
+                        # 🔧 WICHTIG: DSP-Effekte wieder aktivieren!
+                        if segment_commands:
+                            try:
+                                self.status_update_signal.emit(f"🎛️ Wende DSP-Effekte an: {', '.join(segment_commands)}", "blue")
+                                processed_segment = _apply_effects_to_segment(audio_segment, segment_commands)
+                                has_dsp_effects = True
+                                print(f"✅ DSP-Effekte erfolgreich angewendet für Segment {i}")
+                            except Exception as e:
+                                print(f"❌ Fehler beim Anwenden der DSP-Effekte: {e}")
+                                processed_segment = audio_segment  # Fallback to original
+
                         # Now, handle trimming the echo tail if the next segment doesn't have a time-domain effect
                         if has_time_domain_effect:
                             # Check the next segment
@@ -1054,7 +1055,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                             if i + 1 < len(text_segments_info):
                                 next_segment_commands = text_segments_info[i+1]["commands"]
                                 next_segment_has_time_domain_effect = any(cmd.startswith("!echo:") or cmd.startswith("!hall:") for cmd in next_segment_commands)
-                            
+
                             if not next_segment_has_time_domain_effect:
                                 # If the next segment does NOT have a time-domain effect,
                                 # trim the current processed_segment back to its original duration
@@ -1063,10 +1064,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                                 if processed_segment.duration_seconds * 1000 > original_audio_duration_ms:
                                     processed_segment = processed_segment[:original_audio_duration_ms]
                                     # Optionally, add a short fade out to avoid clicks
-                                    # processed_segment = processed_segment.fade_out(50) # Fade out last 50ms
-                        
+                                    processed_segment = processed_segment.fade_out(50) # Fade out last 50ms
+
                         processed_audio_segments.append(processed_segment)
-                    
+
                     # Concatenate all processed segments
                     final_processed_audio = AudioSegment.empty()
                     for segment in processed_audio_segments:
@@ -1076,9 +1077,9 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                     output_dir = "temp_audio"
                     os.makedirs(output_dir, exist_ok=True)
                     temp_output_path = os.path.join(output_dir, f"dsp_final_{uuid.uuid4()}.wav")
-                    
+
                     final_processed_audio.export(temp_output_path, format="wav")
-                    
+
                     audio_to_play = temp_output_path
 
                     print(f"DEBUG: Attempting to play audio from: {audio_to_play}")
@@ -1099,7 +1100,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         self.status_update_signal.emit(f"TTS Fehler: {e}", "yellow")
             else:
                 self.status_update_signal.emit("✅ Antwort erhalten", "green")
-                
+
         except Exception as e:
             self.window.disable_pause_button() # Ensure button is disabled on error
             self.status_update_signal.emit(f"Antwort-Verarbeitung Fehler: {e}", "red")
@@ -1131,22 +1132,6 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.status_update_signal.emit("⏸️ Audio pausiert.", "yellow")
         else:
             self.status_update_signal.emit("Kein Audio zum Pausieren/Fortsetzen.", "yellow")
-
-    def _on_show_branches_requested(self):
-        """Slot to handle request for showing chat branches."""
-        self.status_update_signal.emit("Lade Chat-Branches...", "blue")
-        # Get branch heads from chat_history
-        branch_heads = self.chat_history.get_all_branch_heads()
-        self.send_branch_heads_to_ui_signal.emit(branch_heads)
-        self.status_update_signal.emit("Chat-Branches geladen.", "green")
-
-    def _on_branch_selected_from_ui(self, message_id: str):
-        """Slot to handle selection of a branch from the UI."""
-        self.status_update_signal.emit(f"Wechsle zu Branch: {message_id[:8]}...", "blue")
-        self.chat_history.set_current_branch(message_id) # Set the new branch head
-        self._refresh_chat_display() # Refresh display after branch change
-        self.status_update_signal.emit("Branch gewechselt.", "green")
-
 
     def force_file_operation_prompt(self, operation_type, details):
         """Erstellt einen zwingenden Prompt für Dateisystem-Operationen"""

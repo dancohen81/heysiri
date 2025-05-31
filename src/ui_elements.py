@@ -51,7 +51,6 @@ class LoadingSpinner(QtWidgets.QWidget):
 class ChatDisplay(QtWidgets.QTextBrowser):
     """Custom QTextEdit to handle context menu for message editing."""
     edit_message_requested = QtCore.pyqtSignal(str, str) # Signal for editing a message (message_id, content)
-    branch_icon_clicked = QtCore.pyqtSignal(str) # Signal for clicking a branch icon
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -74,15 +73,8 @@ class ChatDisplay(QtWidgets.QTextBrowser):
             color = "#2196F3"
             edit_button_html = ""
         
-        branch_icons_html = ""
-        if is_branch_point:
-            # Branch icon - make it clickable to switch to this branch
-            branch_icons_html = f"<a href='branch://{message_id}' style='color: #0d7377; text-decoration: none; font-size: {font_size * 0.8}pt; margin-left: 10px;'>🌿</a>"
-            if is_active_branch_head:
-                branch_icons_html += f"<span style='color: #14a085; font-size: {font_size * 0.8}pt;'> (aktiv)</span>" # Active branch indicator
-
         formatted_msg = f"<div data-message-id='{message_id}' style='margin: 5px 0; padding: 8px; background-color: #333; border-left: 3px solid {color}; border-radius: 3px;'>"
-        formatted_msg += f"<b style='color: {color};'>[{timestamp}] {prefix}</b>{edit_button_html}{branch_icons_html}<br>"
+        formatted_msg += f"<b style='color: {color};'>[{timestamp}] {prefix}</b>{edit_button_html}<br>"
         formatted_msg += f"<span style='color: #ffffff; font-size: {font_size}pt;'>{message}</span>"
         formatted_msg += "</div>"
         
@@ -130,7 +122,7 @@ class ChatDisplay(QtWidgets.QTextBrowser):
 
     def clear(self):
         """Löscht Chat-Anzeige."""
-        super().clear()
+        self.setText("")
 
     def _handle_link_click(self, url: QtCore.QUrl):
         """Handles clicks on custom links within the chat display."""
@@ -139,9 +131,6 @@ class ChatDisplay(QtWidgets.QTextBrowser):
             # This requires re-fetching message content, as message_blocks is removed
             # AppLogic will need to provide the content for editing.
             self.edit_message_requested.emit(message_id, "") # Content will be fetched by AppLogic
-        elif url.scheme() == "branch":
-            message_id = url.host()
-            self.branch_icon_clicked.emit(message_id)
         else:
             QtGui.QDesktopServices.openUrl(url)
 
@@ -179,7 +168,6 @@ class StatusWindow(QtWidgets.QWidget):
         self.save_session_btn = None
         self.load_session_btn = None
         self.export_chat_btn = None
-        self.branches_btn = None
         self.clear_btn = None
         self.current_font_size = 11 # Initialize with default font size from stylesheet
 
@@ -293,10 +281,6 @@ class StatusWindow(QtWidgets.QWidget):
         self.export_chat_btn = QtWidgets.QPushButton("📄 Chat exportieren")
         self.export_chat_btn.clicked.connect(self.export_chat_requested)
         button_layout.addWidget(self.export_chat_btn)
-        
-        self.branches_btn = QtWidgets.QPushButton("🌿 Branches")
-        self.branches_btn.clicked.connect(self.show_branches_requested)
-        button_layout.addWidget(self.branches_btn)
 
         self.clear_btn = QtWidgets.QPushButton("🗑️ Aktuelle Sitzung löschen")
         self.clear_btn.clicked.connect(self._on_clear_button_clicked) # Connect to new handler method
@@ -346,7 +330,7 @@ class StatusWindow(QtWidgets.QWidget):
                 self.loading_spinner.stop_animation()
 
     def clear_chat_display(self):
-        """Löscht Chat-Anzeige"""
+        """Löscht Chat-Anzeige."""
         self.chat_display.clear()
         self.set_chat_title("Chat-Verlauf:") # Reset title when chat is cleared
 
@@ -365,8 +349,6 @@ class StatusWindow(QtWidgets.QWidget):
     pause_audio_requested = QtCore.pyqtSignal() # New signal for pausing/resuming audio
     record_feedback_signal = QtCore.pyqtSignal(str, str) # New signal for record feedback
     edit_message_requested = QtCore.pyqtSignal(str, str)
-    show_branches_requested = QtCore.pyqtSignal() # Signal to request branch heads from app_logic
-    branch_selected_from_ui = QtCore.pyqtSignal(str) # Signal to notify app_logic of selected branch
 
     def setup_ui(self):
         """Erstellt die Benutzeroberfläche"""
@@ -423,7 +405,6 @@ class StatusWindow(QtWidgets.QWidget):
         self.save_session_btn = QtWidgets.QPushButton("💾 Speichern...")
         self.load_session_btn = QtWidgets.QPushButton("📂 Laden...")
         self.export_chat_btn = QtWidgets.QPushButton("📄 Chat exportieren")
-        self.branches_btn = QtWidgets.QPushButton("🌿 Branches")
         self.clear_btn = QtWidgets.QPushButton("🗑️ Aktuelle Sitzung löschen")
 
         # Add widgets to layout
@@ -454,7 +435,6 @@ class StatusWindow(QtWidgets.QWidget):
         button_layout.addWidget(self.save_session_btn)
         button_layout.addWidget(self.load_session_btn)
         button_layout.addWidget(self.export_chat_btn)
-        button_layout.addWidget(self.branches_btn)
         button_layout.addWidget(self.clear_btn)
         layout.addLayout(button_layout)
         self.setLayout(layout)
@@ -501,11 +481,6 @@ class StatusWindow(QtWidgets.QWidget):
         else:
             print("DEBUG: export_chat_btn is None, cannot connect signals!")
         
-        if self.branches_btn is not None:
-            self.branches_btn.clicked.connect(self._on_show_branches_button_clicked)
-        else:
-            print("DEBUG: branches_btn is None, cannot connect signals!")
-
         if self.clear_btn is not None:
             self.clear_btn.clicked.connect(self._on_clear_button_clicked)
         else:
@@ -515,20 +490,6 @@ class StatusWindow(QtWidgets.QWidget):
             self.chat_display.edit_message_requested.connect(self.edit_message_requested.emit)
         else:
             print("DEBUG: self.chat_display is None before connecting signal in setup_ui!")
-
-    def _on_show_branches_button_clicked(self):
-        """Handler for the 'Branches' button click."""
-        self.show_branches_requested.emit() # Emit signal to request branch heads
-
-    def show_branch_selection_dialog(self, branch_heads: dict):
-        """Shows the branch selection dialog with the given branch heads."""
-        dialog = BranchSelectionDialog(branch_heads, self)
-        dialog.branch_selected.connect(self._on_branch_selected)
-        dialog.exec_() # Show as modal dialog
-
-    def _on_branch_selected(self, message_id: str):
-        """Handler for when a branch is selected in the dialog."""
-        self.branch_selected_from_ui.emit(message_id) # Emit signal to app_logic
 
     def enable_send_button(self):
         self.send_button.setEnabled(True)
@@ -630,51 +591,3 @@ class StatusWindow(QtWidgets.QWidget):
         self.input_field.setText(text)
         self.input_field.setFocus() # Set focus to the input field after setting text
         self.input_field.selectAll() # Select all text for easy editing/overwriting
-
-class BranchSelectionDialog(QtWidgets.QDialog):
-    """Dialog to display and select chat branches."""
-    branch_selected = QtCore.pyqtSignal(str) # Emits the message_id of the selected branch head
-
-    def __init__(self, branch_heads: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Chat Branches")
-        self.setGeometry(200, 200, 400, 300)
-        self.setModal(True) # Make it a modal dialog
-
-        self.branch_heads = branch_heads # {message_id: first_user_message_content}
-
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QtWidgets.QVBoxLayout(self)
-
-        label = QtWidgets.QLabel("Select a chat branch:")
-        layout.addWidget(label)
-
-        self.branch_list_widget = QtWidgets.QListWidget()
-        self.branch_list_widget.itemDoubleClicked.connect(self._on_branch_double_clicked)
-        layout.addWidget(self.branch_list_widget)
-
-        # Populate the list widget
-        for msg_id, content in self.branch_heads.items():
-            item = QtWidgets.QListWidgetItem(content)
-            item.setData(QtCore.Qt.UserRole, msg_id) # Store message_id in item data
-            self.branch_list_widget.addItem(item)
-        
-        # Buttons
-        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def _on_branch_double_clicked(self, item):
-        selected_id = item.data(QtCore.Qt.UserRole)
-        self.branch_selected.emit(selected_id)
-        self.accept() # Close the dialog
-    
-    def accept(self):
-        selected_item = self.branch_list_widget.currentItem()
-        if selected_item:
-            selected_id = selected_item.data(QtCore.Qt.UserRole)
-            self.branch_selected.emit(selected_id)
-        super().accept()
