@@ -51,6 +51,7 @@ class LoadingSpinner(QtWidgets.QWidget):
 class ChatDisplay(QtWidgets.QTextBrowser):
     """Custom QTextEdit to handle context menu for message editing."""
     edit_message_requested = QtCore.pyqtSignal(str, str) # Signal for editing a message (message_id, content)
+    branch_icon_clicked = QtCore.pyqtSignal(str) # Signal for clicking a branch icon
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,93 +59,97 @@ class ChatDisplay(QtWidgets.QTextBrowser):
         self.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard | QtCore.Qt.LinksAccessibleByMouse) # Enable link interaction
         self.setOpenLinks(False) # Prevent QTextEdit from opening links automatically
         self.anchorClicked.connect(self._handle_link_click) # Connect custom link handler
-        self.message_blocks = [] # To store (start_block, end_block, message_id, role, content)
+        # self.message_blocks = [] # No longer needed, display_messages will rebuild
 
-    def add_chat_message(self, role, message, message_id):
-        """Fügt Nachricht zum Chat-Display hinzu und speichert die ID."""
+    def _add_single_message_to_display(self, role, message, message_id, font_size, is_branch_point=False, is_active_branch_head=False):
+        """Fügt eine einzelne Nachricht zum Chat-Display hinzu."""
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         
         if role == "user":
             prefix = "🧑 Du:"
             color = "#4CAF50"
-            # Add an edit button/link for user messages
-            edit_button_html = f"<a href='edit://{message_id}' style='color: #0d7377; text-decoration: none; font-size: 0.8em; margin-left: 10px;'>✏️ Bearbeiten</a>"
+            edit_button_html = f"<a href='edit://{message_id}' style='color: #0d7377; text-decoration: none; font-size: {font_size * 0.8}pt; margin-left: 10px;'>✏️ Bearbeiten</a>"
         else:
             prefix = "🤖 Claude:"
             color = "#2196F3"
-            edit_button_html = "" # No edit button for assistant messages
+            edit_button_html = ""
         
-        # Store the current block count before appending the new message
-        start_block = self.document().blockCount() - 1 # -1 because append adds a new block
+        branch_icons_html = ""
+        if is_branch_point:
+            # Branch icon - make it clickable to switch to this branch
+            branch_icons_html = f"<a href='branch://{message_id}' style='color: #0d7377; text-decoration: none; font-size: {font_size * 0.8}pt; margin-left: 10px;'>🌿</a>"
+            if is_active_branch_head:
+                branch_icons_html += f"<span style='color: #14a085; font-size: {font_size * 0.8}pt;'> (aktiv)</span>" # Active branch indicator
 
-        # Formatted message with data-message-id attribute
         formatted_msg = f"<div data-message-id='{message_id}' style='margin: 5px 0; padding: 8px; background-color: #333; border-left: 3px solid {color}; border-radius: 3px;'>"
-        formatted_msg += f"<b style='color: {color};'>[{timestamp}] {prefix}</b>{edit_button_html}<br>" # Add edit button here
-        formatted_msg += f"<span style='color: #ffffff;'>{message}</span>"
+        formatted_msg += f"<b style='color: {color};'>[{timestamp}] {prefix}</b>{edit_button_html}{branch_icons_html}<br>"
+        formatted_msg += f"<span style='color: #ffffff; font-size: {font_size}pt;'>{message}</span>"
         formatted_msg += "</div>"
         
         self.append(formatted_msg)
         
-        # Store the block range for this message
-        end_block = self.document().blockCount() - 1
-        self.message_blocks.append((start_block, end_block, message_id, role, message))
-        
-        # Auto-scroll
         cursor = self.textCursor()
         cursor.movePosition(QtGui.QTextCursor.End)
         self.setTextCursor(cursor)
 
+    def display_messages(self, messages: list, current_branch_head_id: str, all_messages_dict: dict, font_size: int):
+        """Löscht das aktuelle Display und zeigt die Nachrichten des gegebenen Zweigs an."""
+        super().clear() # Clear the QTextBrowser content
+
+        # Determine which messages are branch points
+        # A message is a branch point if its ID is a parent_id for more than one message,
+        # or if it's a parent_id for any message that is NOT in the current branch.
+        
+        # Collect all parent_ids that have multiple children
+        parent_child_counts = {}
+        for msg_id, msg_obj in all_messages_dict.items():
+            parent_id = msg_obj.get('parent_id')
+            if parent_id:
+                parent_child_counts.setdefault(parent_id, []).append(msg_id)
+        
+        branch_points = set()
+        for parent_id, children_ids in parent_child_counts.items():
+            if len(children_ids) > 1:
+                branch_points.add(parent_id)
+            else:
+                # Check if the single child is NOT in the current branch (meaning it's a divergent branch)
+                # This requires knowing the full path of the current branch
+                current_branch_ids = {msg['id'] for msg in messages}
+                if children_ids[0] not in current_branch_ids:
+                    branch_points.add(parent_id)
+
+        for msg in messages:
+            msg_id = msg["id"]
+            role = msg["role"]
+            content = msg["content"]
+            
+            is_branch_point = msg_id in branch_points
+            is_active_branch_head = (msg_id == current_branch_head_id)
+
+            self._add_single_message_to_display(role, content, msg_id, font_size, is_branch_point, is_active_branch_head)
+
     def clear(self):
-        """Löscht Chat-Anzeige und zurückgesetzte Nachrichtenblöcke."""
+        """Löscht Chat-Anzeige."""
         super().clear()
-        self.message_blocks = [] # Clear stored blocks
 
     def _handle_link_click(self, url: QtCore.QUrl):
         """Handles clicks on custom links within the chat display."""
         if url.scheme() == "edit":
-            message_id = url.host() # The message_id is the host part of the URL
-            
-            # Find the message content using the message_id
-            message_content = None
-            for _, _, msg_id, role, content in self.message_blocks:
-                if msg_id == message_id and role == 'user':
-                    message_content = content
-                    break
-            
-            if message_content:
-                self.edit_message_requested.emit(message_id, message_content)
-            else:
-                print(f"DEBUG: Message with ID {message_id} not found or not a user message for editing.")
+            message_id = url.host()
+            # This requires re-fetching message content, as message_blocks is removed
+            # AppLogic will need to provide the content for editing.
+            self.edit_message_requested.emit(message_id, "") # Content will be fetched by AppLogic
+        elif url.scheme() == "branch":
+            message_id = url.host()
+            self.branch_icon_clicked.emit(message_id)
         else:
-            # For other links, you might want to open them externally or handle them differently
-            QtGui.QDesktopServices.openUrl(url) # Open external links in default browser
+            QtGui.QDesktopServices.openUrl(url)
 
     def contextMenuEvent(self, event):
         """Handles right-click context menu events."""
-        # Keep the context menu for now, as it's a valid way to interact,
-        # but the primary method will be the inline button.
-        menu = QtWidgets.QMenu(self)
-        edit_action = menu.addAction("Nachricht bearbeiten")
-        
-        # Get the cursor at the event position
-        cursor = self.cursorForPosition(event.pos())
-        
-        # Find which message block the cursor is in
-        current_block_number = cursor.blockNumber()
-        
-        target_message_info = None
-        for start_block, end_block, msg_id, role, content in self.message_blocks:
-            if start_block <= current_block_number <= end_block:
-                target_message_info = (msg_id, role, content)
-                break
-        
-        if target_message_info and target_message_info[1] == 'user': # Only allow editing user messages
-            action = menu.exec_(event.globalPos())
-            if action == edit_action:
-                self.edit_message_requested.emit(target_message_info[0], target_message_info[2])
-        else:
-            # If not a user message or no message found, show default context menu or nothing
-            super().contextMenuEvent(event)
+        # Context menu for editing is now deprecated in favor of inline button
+        # super().contextMenuEvent(event) # Call base class to show default menu if any
+        pass # Disable context menu for now
 
 class StatusWindow(QtWidgets.QWidget):
     """Haupt-UI-Fenster der Anwendung"""
@@ -153,7 +158,7 @@ class StatusWindow(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle("🎤 Voice Chat mit Claude")
         self.setWindowFlags(
-            QtCore.Qt.WindowStaysOnTopHint | # Keep on top
+            # QtCore.Qt.WindowStaysOnTopHint | # Removed: Keep on top
             QtCore.Qt.WindowMinimizeButtonHint | # Keep minimize button
             QtCore.Qt.WindowMaximizeButtonHint | # Keep maximize button
             QtCore.Qt.WindowCloseButtonHint | # Keep close button
@@ -176,6 +181,7 @@ class StatusWindow(QtWidgets.QWidget):
         self.export_chat_btn = None
         self.branches_btn = None
         self.clear_btn = None
+        self.current_font_size = 11 # Initialize with default font size from stylesheet
 
         self.setup_ui()
         self.setup_keyboard()
@@ -302,6 +308,7 @@ class StatusWindow(QtWidgets.QWidget):
     def setup_keyboard(self):
         """Richtet Tastatur-Events ein"""
         self.f3_pressed = False
+        self.f4_pressed = False # Initialize f4_pressed
         self.press_start_time = None # To track how long the F3 key is pressed
         self.feedback_given = False # To ensure feedback is given only once at 0.5s
 
@@ -337,10 +344,6 @@ class StatusWindow(QtWidgets.QWidget):
         else:
             if self.loading_spinner: # Add check for spinner too
                 self.loading_spinner.stop_animation()
-
-    def add_chat_message(self, role, message, message_id): # Changed message_index to message_id
-        """Fügt Nachricht zum Chat-Display hinzu"""
-        self.chat_display.add_chat_message(role, message, message_id) # Pass message_id
 
     def clear_chat_display(self):
         """Löscht Chat-Anzeige"""
@@ -564,12 +567,62 @@ class StatusWindow(QtWidgets.QWidget):
             self.f3_pressed = True
             self.press_start_time = QtCore.QDateTime.currentMSecsSinceEpoch() # Store start time in ms
             self.feedback_given = False
+        elif event.key() == QtCore.Qt.Key_F4 and not event.isAutoRepeat(): # Handle F4 key press
+            self.f4_pressed = True
         super().keyPressEvent(event) # Pass other key events to base class
 
     def keyReleaseEvent(self, event):
         """Tasten-Loslassen-Event (Hauptfenster)"""
         if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
             self.f3_pressed = False
+        elif event.key() == QtCore.Qt.Key_F4 and not event.isAutoRepeat(): # Handle F4 key release
+            self.f4_pressed = False
+        super().keyReleaseEvent(event) # Pass other key events to base class
+
+    def set_font_size(self, new_size):
+        """Sets the font size of relevant UI elements to a specific value."""
+        elements = [self.chat_display, self.status_label, self.input_field, self.chat_title_label]
+        for element in elements:
+            if element:
+                font = element.font()
+                # Ensure font size stays within reasonable limits
+                if new_size > 5 and new_size < 31:
+                    font.setPointSize(new_size)
+                    element.setFont(font)
+                    # For QTextEdit, also adjust the document's default font
+                    if isinstance(element, QtWidgets.QTextEdit):
+                        cursor = element.textCursor()
+                        cursor.select(QtGui.QTextCursor.Document)
+                        format = cursor.charFormat()
+                        format.setFontPointSize(new_size)
+                        cursor.mergeCharFormat(format)
+                        cursor.select(QtGui.QTextCursor.Document) # Re-select to apply to whole document
+                        element.setTextCursor(cursor)
+        self.current_font_size = new_size # Store the new font size
+
+
+    def keyPressEvent(self, event):
+        """Tastendruck-Event (Hauptfenster)"""
+        if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
+            self.f3_pressed = True
+            self.press_start_time = QtCore.QDateTime.currentMSecsSinceEpoch() # Store start time in ms
+            self.feedback_given = False
+        elif event.key() == QtCore.Qt.Key_F4 and not event.isAutoRepeat(): # Handle F4 key press
+            self.f4_pressed = True
+        elif event.modifiers() == QtCore.Qt.ControlModifier and event.key() == QtCore.Qt.Key_Equal: # Ctrl + '=' for zoom in
+            current_size = self.chat_display.font().pointSize() # Get current size from one element
+            self.set_font_size(current_size + 1) # Zoom in
+        elif event.modifiers() == QtCore.Qt.ControlModifier and event.key() == QtCore.Qt.Key_Minus: # Ctrl + '-' for zoom out
+            current_size = self.chat_display.font().pointSize() # Get current size from one element
+            self.set_font_size(current_size - 1) # Zoom out
+        super().keyPressEvent(event) # Pass other key events to base class
+
+    def keyReleaseEvent(self, event):
+        """Tasten-Loslassen-Event (Hauptfenster)"""
+        if event.key() == QtCore.Qt.Key_F3 and not event.isAutoRepeat():
+            self.f3_pressed = False
+        elif event.key() == QtCore.Qt.Key_F4 and not event.isAutoRepeat(): # Handle F4 key release
+            self.f4_pressed = False
         super().keyReleaseEvent(event) # Pass other key events to base class
 
     def set_input_text(self, text):

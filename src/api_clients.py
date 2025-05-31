@@ -1,6 +1,7 @@
 import requests
 import openai
 import os
+import json # Added for OpenRouter tool handling
 from src.config import (
     ELEVENLABS_VOICE_ID, ELEVENLABS_URL, SYSTEM_PROMPT,
     ELEVENLABS_STABILITY, ELEVENLABS_SIMILARITY_BOOST, ELEVENLABS_STYLE, ELEVENLABS_USE_SPEAKER_BOOST,
@@ -295,6 +296,8 @@ class ElevenLabsTTS:
         self.api_key = api_key
         self.voice_id = voice_id
         self.url = ELEVENLABS_URL.format(ELEVENLABS_VOICE_ID=voice_id)
+        self.temp_audio_dir = "temp_audio" # Define temp directory here
+        os.makedirs(self.temp_audio_dir, exist_ok=True) # Ensure directory exists on init
     
     def text_to_speech(self, original_text, output_file=None):
         """Konvertiert Text zu Sprache"""
@@ -303,10 +306,13 @@ class ElevenLabsTTS:
         # so speed commands should be at the beginning of the segment if present.
         text_to_send, speed_multiplier = parse_voice_commands_for_speed_param(original_text)
 
-        # Eindeutigen Dateinamen generieren
+        # Generate unique filename within the temp_audio_dir
         if output_file is None:
             timestamp = int(time.time() * 1000)
-            output_file = f"claude_response_{timestamp}.mp3"
+            output_file = os.path.join(self.temp_audio_dir, f"claude_response_{timestamp}.mp3")
+        else:
+            # Ensure output_file is within temp_audio_dir if provided
+            output_file = os.path.join(self.temp_audio_dir, os.path.basename(output_file))
         
         # Alte Dateien aufräumen (only if not a temp file from previous segment)
         # This cleanup logic should ideally be handled by the caller (app_logic)

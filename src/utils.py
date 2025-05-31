@@ -34,6 +34,7 @@ def play_audio_file(filename, stop_event=None, pause_event=None):
             return False
             
         # Methode 1: pygame (bevorzugt)
+        print("DEBUG: Attempting playback with pygame...")
         try:
             import pygame
             pygame.mixer.init()
@@ -44,46 +45,53 @@ def play_audio_file(filename, stop_event=None, pause_event=None):
             while pygame.mixer.music.get_busy():
                 if stop_event and stop_event.is_set():
                     pygame.mixer.music.stop()
+                    print("DEBUG: Playback stopped by stop_event.")
                     break
                 
                 if pause_event and pause_event.is_set():
                     pygame.mixer.music.pause()
+                    print("DEBUG: Playback paused.")
                     while pause_event.is_set():
                         time.sleep(0.1) # Wait while paused
                     pygame.mixer.music.unpause()
+                    print("DEBUG: Playback unpaused.")
                 
                 pygame.time.wait(100)
             
             pygame.mixer.quit()
+            print("DEBUG: Playback with pygame successful.")
             return True
             
         except ImportError:
-            print("pygame nicht verfügbar - verwende Fallback")
+            print("DEBUG: pygame not available - falling back.")
         except Exception as e:
-            print(f"pygame Fehler: {e}")
+            print(f"DEBUG: pygame error: {e} - falling back.")
         
         # Fallback-Methoden (nicht stoppbar, nur für Notfälle)
         # Methode 2: Windows Media Player
+        print("DEBUG: Attempting playback with os.startfile...")
         try:
             os.startfile(filename)
+            print("DEBUG: Playback with os.startfile successful (may run in background).")
             # For non-interruptible playback, we might still want to wait a bit
             # or just let it play in the background. For now, just return.
             return True
         except Exception as e:
-            print(f"startfile Fehler: {e}")
+            print(f"DEBUG: os.startfile error: {e} - falling back.")
         
         # Methode 3: System-Befehl
+        print("DEBUG: Attempting playback with subprocess.run...")
         try:
-            import subprocess
             subprocess.run(['start', '', filename], shell=True, check=True)
+            print("DEBUG: Playback with subprocess.run successful (may run in background).")
             return True
         except Exception as e:
-            print(f"subprocess Fehler: {e}")
+            print(f"DEBUG: subprocess error: {e} - playback failed.")
             
         return False
         
     except Exception as e:
-        print(f"Audio-Wiedergabe fehlgeschlagen: {e}")
+        print(f"DEBUG: Audio playback failed: {e}")
         return False
     
     finally:
@@ -94,7 +102,6 @@ def play_audio_file(filename, stop_event=None, pause_event=None):
                 # Only clean up if playback finished naturally or it's a temp file
                 # If stop_event is set, it means it was interrupted, so don't delete immediately
                 # unless it's a temporary file that should always be deleted.
-                time.sleep(2)  # 2 Sekunden warten
                 try:
                     # Check if the file is still there and if it's a temporary response file
                     if os.path.exists(filename) and (filename.startswith("claude_response") or "temp" in filename):

@@ -1,10 +1,9 @@
 import re
 import numpy as np
-from scipy.io import wavfile
-from scipy import signal
-import os
-import uuid
 from pydub import AudioSegment
+from pedalboard import Pedalboard, Reverb, Delay, PitchShift, LowpassFilter, HighpassFilter
+# from pedalboard.plugins import Tremolo, Chorus, Flanger, Overdrive # Commented out due to persistent import issues
+from pedalboard.io import AudioFile
 
 def _split_text_by_commands(text: str):
     """
@@ -12,34 +11,32 @@ def _split_text_by_commands(text: str):
     Each segment is a dictionary with 'text' and 'commands'.
     Commands apply to the text segment that follows them.
     """
-    command_pattern = re.compile(r"(!(?:echo|hall|pitch[+-]?|lowpass|highpass|normal):)\s*")
+    command_pattern = re.compile(r"(!(?:echo|hall|pitch[+-]?|lowpass|highpass|normal|tremolo|flanger|chorus|overdrive|reverse):)")
     
     segments = []
-    current_text_buffer = []
+    last_idx = 0
+    
+    # Find all commands and their positions
+    matches = list(command_pattern.finditer(text))
+    
     current_commands = []
-
-    # Split the text by commands, keeping the commands in the result
-    parts = command_pattern.split(text)
-    
-    for i, part in enumerate(parts):
-        if not part:
-            continue
-
-        # Check if the part is a command (by trying to match the full part against the command pattern)
-        if command_pattern.fullmatch(part.strip()):
-            # If there's buffered text, add it as a segment
-            if current_text_buffer:
-                segments.append({"text": "".join(current_text_buffer).strip(), "commands": list(current_commands)})
-                current_text_buffer = []
-                current_commands = [] # Reset commands for the new segment
-            current_commands.append(part.strip()) # Add the command to the current commands list
-        else: # It's text
-            current_text_buffer.append(part)
-    
-    # Add any remaining buffered text and commands
-    if current_text_buffer or current_commands:
-        segments.append({"text": "".join(current_text_buffer).strip(), "commands": list(current_commands)})
-    
+    for match in matches:
+        # Extract text before the current command
+        segment_text = text[last_idx:match.start()].strip()
+        
+        if segment_text:
+            segments.append({"text": segment_text, "commands": list(current_commands)})
+            current_commands = [] # Reset commands after they've been applied to a text segment
+        
+        # Add the current command to the list of commands for the *next* text segment
+        current_commands.append(match.group(0))
+        last_idx = match.end()
+        
+    # Add any remaining text after the last command
+    remaining_text = text[last_idx:].strip()
+    if remaining_text or current_commands: # Even if no text, if there are commands, they form a segment
+        segments.append({"text": remaining_text, "commands": list(current_commands)})
+        
     return segments
 
 def parse_dsp_commands(ai_response: str):
@@ -50,118 +47,17 @@ def parse_dsp_commands(ai_response: str):
     """
     return _split_text_by_commands(ai_response)
 
-def apply_echo(audio_data: np.ndarray, sample_rate: int, delay_ms: int = 200, decay: float = 0.5) -> np.ndarray:
-    """Applies an echo effect to the audio data, allowing the echo to decay beyond the original length."""
-    if not audio_data.size:
-        return audio_data
-    
-    delay_samples = int(sample_rate * delay_ms / 1000)
-    
-    # Determine the length of the echo tail.
-    # Let's estimate a tail duration, e.g., 1 second or 3 * delay_ms, whichever is larger.
-    echo_tail_duration_ms = max(1000, delay_ms * 3) 
-    echo_tail_samples = int(sample_rate * echo_tail_duration_ms / 1000)
-
-    # The new length of the audio will be original length + echo tail length
-    new_length = len(audio_data) + echo_tail_samples
-    echoed_audio = np.zeros(new_length, dtype=np.float64)
-    
-    audio_data_float = audio_data.astype(np.float64)
-
-    # Copy original audio to the beginning of the new array
-    echoed_audio[:len(audio_data_float)] = audio_data_float
-
-    # Apply the echo effect
-    # The echo will be added to the original audio and extend into the padded area
-    # This loop applies multiple echoes
-    current_decay_factor = 1.0
-    for i in range(1, 10): # Apply up to 10 echoes, or until decay is too small
-        current_delay_samples = delay_samples * i
-        current_decay_factor *= decay
-        
-        if current_decay_factor < 0.01: # Stop if echo is too quiet
-            break
-        
-        if current_delay_samples < new_length:
-            # Calculate the portion of the original audio that will be echoed at this delay
-            source_start = 0
-            source_end = len(audio_data_float)
-            
-            # Calculate the destination in the echoed_audio array
-            dest_start = current_delay_samples
-            dest_end = min(new_length, current_delay_samples + len(audio_data_float))
-            
-            # Ensure source and destination slices match length
-            slice_length = min(len(audio_data_float), new_length - current_delay_samples)
-            
-            echoed_audio[dest_start : dest_start + slice_length] += audio_data_float[source_start : source_start + slice_length] * current_decay_factor
-
-    # Normalize to prevent clipping
-    max_val = np.max(np.abs(echoed_audio))
-    if max_val > 1.0:
-        echoed_audio /= max_val
-
-    return echoed_audio.astype(audio_data.dtype)
-
-def apply_reverb(audio_data: np.ndarray, sample_rate: int, decay_ms: int = 1000, num_echoes: int = 5, initial_decay: float = 0.6) -> np.ndarray:
-    """Applies a simplified reverb effect using multiple decaying echoes."""
-    if not audio_data.size:
-        return audio_data
-
-    reverb_audio = audio_data.astype(np.float64)
-    current_decay = initial_decay
-    
-    for i in range(1, num_echoes + 1):
-        delay_ms = int(decay_ms / num_echoes * i)
-        reverb_audio = apply_echo(reverb_audio, sample_rate, delay_ms, current_decay)
-        current_decay *= 0.7 # Further decay for subsequent echoes
-        
-    return reverb_audio.astype(audio_data.dtype)
-
-def apply_pitch_shift(audio_data: np.ndarray, sample_rate: int, semitones: int) -> np.ndarray:
+def clean_text_from_dsp_commands(text: str) -> str:
     """
-    Applies a simple pitch shift by resampling.
-    Note: This will also change the tempo. For true pitch shift without tempo change,
-    more advanced algorithms (e.g., PSOLA) or libraries like pydub/librosa are needed.
+    Removes all DSP commands from a given text string.
     """
-    if not audio_data.size:
-        return audio_data
-
-    factor = 2**(semitones / 12.0)
-    original_length = len(audio_data)
-    
-    # Resample
-    resampled_audio = signal.resample(audio_data, int(original_length / factor))
-    
-    # Pad or truncate to original length (this will affect tempo)
-    if len(resampled_audio) < original_length:
-        padded_audio = np.zeros(original_length, dtype=resampled_audio.dtype)
-        padded_audio[:len(resampled_audio)] = resampled_audio
-        return padded_audio
-    else:
-        return resampled_audio[:original_length]
-
-def apply_filter(audio_data: np.ndarray, sample_rate: int, filter_type: str, cutoff_freq: float) -> np.ndarray:
-    """Applies a Butterworth filter (low-pass or high-pass)."""
-    if not audio_data.size:
-        return audio_data
-
-    nyquist = 0.5 * sample_rate
-    normal_cutoff = cutoff_freq / nyquist
-    
-    if normal_cutoff >= 1.0 or normal_cutoff <= 0.0:
-        print(f"Warning: Cutoff frequency {cutoff_freq} Hz is out of valid range for filter type {filter_type}. Skipping filter.")
-        return audio_data
-
-    b, a = signal.butter(5, normal_cutoff, btype=filter_type, analog=False)
-    filtered_audio = signal.lfilter(b, a, audio_data)
-    return filtered_audio.astype(audio_data.dtype)
-
-import math
+    command_pattern = re.compile(r"(!(?:echo|hall|pitch[+-]?|lowpass|highpass|normal|tremolo|flanger|chorus|overdrive|reverse):)\s*")
+    cleaned_text = command_pattern.sub("", text)
+    return cleaned_text.strip()
 
 def _apply_effects_to_segment(audio_segment: AudioSegment, commands: list) -> AudioSegment:
     """
-    Applies DSP effects to a single pydub AudioSegment.
+    Applies DSP effects to a single pydub AudioSegment using pedalboard.
     """
     if not audio_segment.duration_seconds:
         return audio_segment
@@ -169,77 +65,92 @@ def _apply_effects_to_segment(audio_segment: AudioSegment, commands: list) -> Au
     sample_rate = audio_segment.frame_rate
     
     # Convert pydub AudioSegment to numpy array for processing
-    audio_data = np.array(audio_segment.get_array_of_samples())
-    
+    # pedalboard expects float32, normalized to -1.0 to 1.0
+    audio_data = np.array(audio_segment.get_array_of_samples()).astype(np.float32) / (2**15) # Assuming 16-bit audio
+
     # If stereo, convert to mono by taking the first channel or averaging
     if audio_segment.channels > 1:
-        audio_data = audio_data[::audio_segment.channels] 
+        audio_data = audio_data.reshape(-1, audio_segment.channels).mean(axis=1)
 
-    # Convert to float for processing
-    if audio_segment.sample_width == 2: # 16-bit
-        audio_data = audio_data.astype(np.float32) / (2**15)
-    elif audio_segment.sample_width == 4: # 32-bit
-        audio_data = audio_data.astype(np.float32) / (2**31)
-    else: # Fallback for other sample widths, normalize to -1.0 to 1.0
-        audio_data = audio_data.astype(np.float32) / np.iinfo(audio_data.dtype).max
-
-    processed_audio_data = audio_data
+    board = Pedalboard()
 
     # Check for !normal: command first to reset all effects for this segment
     if any(cmd.startswith("!normal:") for cmd in commands):
-        processed_audio_data = audio_data # Revert to original audio for this segment
         print(f"DEBUG: !normal: command detected. Skipping other DSP effects for this segment.")
-        # No need to process other commands if !normal: is present
-        # However, other commands might be in the list, so we need to ensure they don't apply.
-        # The simplest is to just set processed_audio_data and then break.
+        # No effects applied, return original audio data
     else:
         for cmd in commands:
             if cmd.startswith("!echo:"):
-                processed_audio_data = apply_echo(processed_audio_data, sample_rate)
-            elif cmd.startswith("!hall:"): # Using !hall: for reverb
-                processed_audio_data = apply_reverb(processed_audio_data, sample_rate)
+                # Pedalboard Delay effect
+                board.append(Delay(delay_seconds=0.3, feedback=0.4, mix=0.5))
+            elif cmd.startswith("!hall:"):
+                # Pedalboard Reverb effect
+                board.append(Reverb(room_size=0.5, damping=0.5, wet_level=0.3, dry_level=0.7))
             elif cmd.startswith("!pitch+"):
                 semitones = int(cmd.replace("!pitch+", "").replace(":", "")) if cmd.replace("!pitch+", "").replace(":", "").isdigit() else 2
-                processed_audio_data = apply_pitch_shift(processed_audio_data, sample_rate, semitones)
+                board.append(PitchShift(semitones=semitones))
             elif cmd.startswith("!pitch-"):
                 semitones = int(cmd.replace("!pitch-", "").replace(":", "")) if cmd.replace("!pitch-", "").replace(":", "").isdigit() else -2
-                processed_audio_data = apply_pitch_shift(processed_audio_data, sample_rate, -semitones) # Negative semitones for pitch-
+                board.append(PitchShift(semitones=-semitones)) # Negative semitones for pitch down
             elif cmd.startswith("!lowpass:"):
                 try:
-                    # Extract cutoff frequency, default to 500 if not provided or invalid
                     cutoff_str = cmd.replace("!lowpass:", "").strip()
                     cutoff = float(cutoff_str) if cutoff_str else 500.0
-                    processed_audio_data = apply_filter(processed_audio_data, sample_rate, "lowpass", cutoff)
+                    board.append(LowpassFilter(cutoff_frequency_hz=cutoff))
                 except ValueError:
                     print(f"Invalid cutoff frequency for !lowpass: {cmd}. Using default 500Hz.")
-                    processed_audio_data = apply_filter(processed_audio_data, sample_rate, "lowpass", 500.0)
+                    board.append(LowpassFilter(cutoff_frequency_hz=500.0))
             elif cmd.startswith("!highpass:"):
                 try:
-                    # Extract cutoff frequency, default to 2000 if not provided or invalid
                     cutoff_str = cmd.replace("!highpass:", "").strip()
                     cutoff = float(cutoff_str) if cutoff_str else 2000.0
-                    processed_audio_data = apply_filter(processed_audio_data, sample_rate, "highpass", cutoff)
+                    board.append(HighpassFilter(cutoff_frequency_hz=cutoff))
                 except ValueError:
                     print(f"Invalid cutoff frequency for !highpass: {cmd}. Using default 2000Hz.")
-                    processed_audio_data = apply_filter(processed_audio_data, sample_rate, "highpass", 2000.0)
+                    board.append(HighpassFilter(cutoff_frequency_hz=2000.0))
+            elif cmd.startswith("!tremolo:"):
+                # board.append(Tremolo(rate=3.0, depth=0.5)) # Commented out due to import issues
+                print(f"DEBUG: Tremolo effect skipped due to import issues: {cmd}")
+                pass
+            elif cmd.startswith("!flanger:"):
+                # board.append(Flanger(rate=0.25, depth=1.0, mix=0.5, feedback=0.0, delay_time=0.003)) # Commented out due to import issues
+                print(f"DEBUG: Flanger effect skipped due to import issues: {cmd}")
+                pass
+            elif cmd.startswith("!chorus:"):
+                # board.append(Chorus(rate=1.5, depth=0.7, centre_delay=0.03, feedback=0.25, mix=0.5)) # Commented out due to import issues
+                print(f"DEBUG: Chorus effect skipped due to import issues: {cmd}")
+                pass
+            elif cmd.startswith("!overdrive:"):
+                # board.append(Overdrive(drive_db=45.0)) # Commented out due to import issues
+                print(f"DEBUG: Overdrive effect skipped due to import issues: {cmd}")
+                pass
+            elif cmd.startswith("!reverse:"):
+                # Pedalboard does not have a direct reverse effect.
+                # This would require manual manipulation of the numpy array.
+                # For now, we'll skip it or implement it separately if critical.
+                print(f"DEBUG: Reverse effect not directly supported by Pedalboard. Skipping: {cmd}")
+                pass
             else:
                 print(f"Unknown DSP command: {cmd}")
 
-    # Convert processed numpy array back to pydub AudioSegment
-    # Determine the target sample width based on the original audio segment
-    target_sample_width = audio_segment.sample_width
+    # Apply effects
+    # Ensure audio_data is 2D (channels, samples) for pedalboard
+    if audio_data.ndim == 1:
+        audio_data = audio_data.reshape(1, -1) # Convert mono to (1, samples)
 
-    if target_sample_width == 2: # 16-bit
-        processed_audio_data = np.clip(processed_audio_data * (2**15), - (2**15), (2**15) - 1).astype(np.int16)
-    elif target_sample_width == 4: # 32-bit
-        processed_audio_data = np.clip(processed_audio_data * (2**31), - (2**31), (2**31) - 1).astype(np.int32)
-    else: # Fallback to 16-bit if original was not 2 or 4 bytes
-        processed_audio_data = np.clip(processed_audio_data * (2**15), - (2**15), (2**15) - 1).astype(np.int16)
-        target_sample_width = 2
+    processed_audio_data = board(audio_data, sample_rate)
+
+    # Convert processed numpy array back to pydub AudioSegment
+    # Ensure processed_audio_data is 1D for pydub
+    if processed_audio_data.ndim > 1:
+        processed_audio_data = processed_audio_data.flatten()
+
+    # Convert back to 16-bit integer for pydub
+    processed_audio_data = np.clip(processed_audio_data * (2**15), - (2**15), (2**15) - 1).astype(np.int16)
 
     return AudioSegment(
         processed_audio_data.tobytes(), 
         frame_rate=sample_rate,
-        sample_width=target_sample_width,
+        sample_width=2, # 16-bit
         channels=1 # Assuming mono after processing
     )

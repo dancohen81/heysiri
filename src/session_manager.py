@@ -5,12 +5,12 @@ from PyQt5 import QtWidgets, QtCore
 from src.chat_history import ChatHistory
 
 class ChatSessionManager:
-    def __init__(self, chat_history: ChatHistory, llm_api, window, status_update_signal, chat_message_signal):
+    def __init__(self, chat_history: ChatHistory, llm_api, window, status_update_signal, app_instance):
         self.chat_history = chat_history
         self.llm_api = llm_api # Renamed from claude
         self.window = window
         self.status_update_signal = status_update_signal
-        self.chat_message_signal = chat_message_signal
+        self.app_instance = app_instance # Store the VoiceChatApp instance
         self.current_session_name = self.chat_history.session_name
         self.editing_message_id = None # NEW: To store the ID of the message being edited
 
@@ -73,17 +73,8 @@ Beispiele:
     def load_existing_chat(self):
         """Lädt den Chat-Verlauf der aktuellen Sitzung in die UI."""
         print(f"DEBUG: load_existing_chat called for session '{self.current_session_name}'")
-        self.window.clear_chat_display() # Ensure display is cleared before reloading
-        
-        # Get all messages from the current session's history
-        all_messages_in_session = list(self.chat_history.messages.values())
-        
-        # Sort all messages by timestamp to display them chronologically
-        sorted_messages = sorted(all_messages_in_session, key=lambda x: x['timestamp'])
-        
-        print(f"DEBUG: load_existing_chat lädt {len(sorted_messages)} Nachrichten.")
-        for msg in sorted_messages:
-            self.window.add_chat_message(msg["role"], msg["content"], msg["id"]) # Pass message ID
+        # The _refresh_chat_display method in app_instance will handle clearing and displaying
+        self.app_instance._refresh_chat_display()
         self.status_update_signal.emit(f"Sitzung '{self.current_session_name}' geladen", "green")
 
     def edit_chat_message_from_ui(self, message_id, original_content):
@@ -97,11 +88,11 @@ Beispiele:
         default_title = "default"
         # Try to generate a title from the *previous* session if it's not empty
         if self.chat_history.messages:
-            generated_title = self._generate_session_title_with_ai(self.chat_history.messages)
+            # Pass a list of message dictionaries (values) instead of the message dictionary itself
+            generated_title = self._generate_session_title_with_ai(list(self.chat_history.messages.values()))
             if generated_title:
                 default_title = generated_title
 
-        self.window.releaseKeyboard() # Release keyboard before opening dialog
         dialog = QtWidgets.QInputDialog(self.window)
         dialog.setWindowTitle("Neue Sitzung")
         dialog.setLabelText("Name der neuen Sitzung (leer für 'default'):")
@@ -114,7 +105,6 @@ Beispiele:
 
         ok = dialog.exec_()
         session_name = dialog.textValue()
-        self.window.grabKeyboard() # Re-grab keyboard after dialog closes
 
         if ok:
             if not session_name:
@@ -123,13 +113,17 @@ Beispiele:
             self.chat_history.new_session(session_name)
             self.load_existing_chat()
             self.status_update_signal.emit(f"Neue Sitzung '{session_name}' gestartet", "green")
+            self.window.enable_send_button() # Ensure send button and input field are enabled
+            # Delay setting focus and activate window to ensure the UI is ready to receive it
+            QtCore.QTimer.singleShot(50, lambda: (self.window.activateWindow(), self.window.input_field.setFocus()))
 
     def save_chat_session_as(self):
         """Speichert die aktuelle Chat-Sitzung unter einem neuen Namen."""
         default_title = self.current_session_name
         # Try to generate a title from the current session if it's not empty
         if self.chat_history.messages:
-            generated_title = self._generate_session_title_with_ai(self.chat_history.messages)
+            # Pass a list of message dictionaries (values) instead of the message dictionary itself
+            generated_title = self._generate_session_title_with_ai(list(self.chat_history.messages.values()))
             if generated_title:
                 default_title = generated_title
 

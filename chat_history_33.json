@@ -1,0 +1,21 @@
+{
+  "created": "2025-05-31T13:20:46.933903",
+  "session_name": "33",
+  "messages": {
+    "32f8e630-76d5-48af-84a1-f334a449636d": {
+      "id": "32f8e630-76d5-48af-84a1-f334a449636d",
+      "parent_id": null,
+      "role": "user",
+      "content": "lass uns fx testen!",
+      "timestamp": "2025-05-31T13:20:41.887947"
+    },
+    "8c7796d9-3bb6-465d-8aac-0bc81532f566": {
+      "id": "8c7796d9-3bb6-465d-8aac-0bc81532f566",
+      "parent_id": "32f8e630-76d5-48af-84a1-f334a449636d",
+      "role": "assistant",
+      "content": "Ich zeige dir verschiedene Effekte in mehreren Nachrichten:\n\n!hall: Hallo! Dies ist meine Stimme mit einem Halleffekt. Es klingt als würde ich in einer großen Kathedrale sprechen.\n\n!echo: Jetzt spreche ich mit einem Echo-Effekt. Hörst du wie sich meine Worte wiederholen?\n\n!pitch+4: Hier spreche ich mit einer höheren Stimme, fast wie ein kleines Wesen!\n\n!pitch-4: Und hier klingt meine Stimme tiefer, wie ein großer Riese.\n\n!tremolo: Der Tremolo-Effekt lässt meine Stimme wellenförmig schwingen, wie ein vibrierender Klang.\n\n!chorus: Der Chorus-Effekt macht meine Stimme voller und breiter, als würden mehrere Stimmen gleichzeitig sprechen.\n\n!flanger: Mit dem Flanger-Effekt bekommt meine Stimme einen interessanten, metallischen Klang.\n\nWelcher Effekt gefällt dir am besten? Wir können auch verschiedene Effekte kombinieren!",
+      "timestamp": "2025-05-31T13:20:46.933903"
+    }
+  },
+  "current_branch_head_id": "8c7796d9-3bb6-465d-8aac-0bc81532f566"
+}

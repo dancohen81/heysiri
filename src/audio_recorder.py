@@ -1,12 +1,19 @@
 import os
 import numpy as np
-import sounddevice as sd
 import scipy.io.wavfile as wavfile
 import openai
 import threading
+import winsound # Import winsound for beep feedback
 from PyQt5 import QtCore, QtWidgets # Import QtWidgets for QInputDialog, QFileDialog, QMessageBox
 
 from src.config import SAMPLERATE, AUDIO_FILENAME
+
+try:
+    import sounddevice as sd
+    print("DEBUG: sounddevice imported successfully.")
+except Exception as e:
+    print(f"ERROR: Failed to import sounddevice: {e}")
+    sd = None # Ensure sd is None if import fails
 
 class AudioRecorder(QtCore.QObject):
     """Handles audio recording, transcription, and related UI updates."""
@@ -44,11 +51,12 @@ class AudioRecorder(QtCore.QObject):
                         # Provide feedback after 0.5 seconds of holding
                         self.window.record_feedback_signal.emit("🟠 Halten für Aufnahme...", "orange")
                         self.window.feedback_given = True
-        else: # F3 is not pressed
-            if self.is_recording:
+        elif self.window.f4_pressed and self.is_recording: # F4 pressed while recording
+            self.cancel_recording()
+        else: # F3 is not pressed and F4 is not pressed (or not recording)
+            if self.is_recording: # F3 was released while recording
                 self.stop_recording()
-            elif self.window.press_start_time is not None:
-                # F3 was pressed but released before 1.0s
+            elif self.window.press_start_time is not None: # F3 was pressed but released before 1.0s
                 press_duration = (current_time - self.window.press_start_time) / 1000.0
                 if press_duration < 1.0:
                     self.window.record_feedback_signal.emit("🟡 Taste zu kurz gedrückt", "yellow")
@@ -67,6 +75,7 @@ class AudioRecorder(QtCore.QObject):
                 callback=self.audio_callback
             )
             self.stream.start()
+            winsound.Beep(1000, 100) # Beep on start
             self.is_recording = True
             self.recording_start_time = QtCore.QDateTime.currentMSecsSinceEpoch() # Actual recording start time
             self.window.grabKeyboard() # Grab keyboard when recording starts
@@ -90,6 +99,7 @@ class AudioRecorder(QtCore.QObject):
                 self.stream = None
             
             self.is_recording = False
+            winsound.Beep(500, 100) # Beep on stop
             self.recording_start_time = None # Reset recording start time
             self.window.releaseKeyboard() # Release keyboard when recording stops
             self.window.input_field.setFocus() # Return focus to input field
@@ -183,9 +193,32 @@ class AudioRecorder(QtCore.QObject):
             self.window.disable_stop_button() # Disable stop on error
         
         finally:
-            # Aufräumen
+            # Aufräumen (nur wenn nicht abgebrochen)
             if os.path.exists(AUDIO_FILENAME):
                 try:
                     os.remove(AUDIO_FILENAME)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Fehler beim Löschen der Audiodatei: {e}")
+
+    def cancel_recording(self):
+        """Bricht die Audio-Aufnahme ab und verwirft die Daten."""
+        try:
+            if self.stream:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+            
+            self.is_recording = False
+            self.recording_data = [] # Wichtig: Aufnahmedaten verwerfen
+            self.recording_start_time = None
+            self.window.releaseKeyboard()
+            self.window.input_field.setFocus()
+            
+            self.status_update_signal.emit("❌ Aufnahme abgebrochen!", "red")
+            self.window.enable_send_button()
+            self.window.disable_stop_button()
+            
+        except Exception as e:
+            self.status_update_signal.emit(f"Abbruch-Fehler: {e}", "red")
+            self.window.enable_send_button()
+            self.window.disable_stop_button()

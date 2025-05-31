@@ -1,0 +1,21 @@
+{
+  "created": "2025-05-31T13:19:26.242266",
+  "session_name": "fx test",
+  "messages": {
+    "7257c6e8-32c0-4b60-897c-8d809d382e34": {
+      "id": "7257c6e8-32c0-4b60-897c-8d809d382e34",
+      "parent_id": null,
+      "role": "user",
+      "content": "teste mal alle fx sachen, bitte",
+      "timestamp": "2025-05-31T13:19:18.303654"
+    },
+    "848fb591-ce25-4e82-a556-28d232389bb7": {
+      "id": "848fb591-ce25-4e82-a556-28d232389bb7",
+      "parent_id": "7257c6e8-32c0-4b60-897c-8d809d382e34",
+      "role": "assistant",
+      "content": "Ich werde dir verschiedene Effekte demonstrieren, einen nach dem anderen:\n\n!echo: Mit Echo klingt es so, als würde ich in einer Höhle sprechen. Das ist der Echo-Effekt!\n\n!hall: Der Halleffekt macht meine Stimme so, als wäre ich in einer großen Kathedrale.\n\n!pitch+4: Jetzt klingt meine Stimme höher, als wäre ich eine Cartoon-Figur!\n\n!pitch-4: Und jetzt tiefer, wie ein großer Bär!\n\n!lowpass:500: Der Tiefpassfilter macht meine Stimme dumpf, als würde ich durch eine dicke Wand sprechen.\n\n!highpass:2000: Der Hochpassfilter lässt meine Stimme dünn und metallisch klingen.\n\n!tremolo: Der Tremolo-Effekt lässt meine Stimme rhythmisch schwanken, wie eine Sirene.\n\n!flanger: Der Flanger gibt meiner Stimme einen interessanten, sich bewegenden Klang, fast wie ein Raumschiff.\n\n!chorus: Der Chorus-Effekt macht meine Stimme voller, als würden mehrere Stimmen gleichzeitig sprechen.\n\n!overdrive: Mit Overdrive klingt es verzerrt, wie bei einem Rockkonzert!\n\n!normal: Und hier zum Abschluss wieder meine normale Stimme ohne Effekte.\n\nMan kann diese Effekte auch kombinieren. Hier ein Beispiel:\n!echo: !pitch+2: !hall: Diese Kombination klingt wie ein singendes Geisterwesen in einer großen Höhle!\n\nWas hältst du von den verschiedenen Klangeffekten?",
+      "timestamp": "2025-05-31T13:19:26.242266"
+    }
+  },
+  "current_branch_head_id": "848fb591-ce25-4e82-a556-28d232389bb7"
+}

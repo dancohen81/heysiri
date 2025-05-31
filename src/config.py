@@ -5,9 +5,14 @@ SAMPLERATE = 16000
 AUDIO_FILENAME = "temp_aufnahme.wav"
 CHAT_HISTORY_FILE = "chat_history.json"
 TTS_OUTPUT_FILE = "claude_response.mp3"
+MAX_TOOL_RESULT_LENGTH = 4000 # Maximale Länge für Tool-Ergebnisse, die an LLM gesendet werden
 
 import json
 import os
+
+# Set FFmpeg and FFprobe paths for pydub
+os.environ["FFMPEG_PATH"] = r"C:\ProgramData\Chocolatey\bin\ffmpeg.exe"
+os.environ["FFPROBE_PATH"] = r"C:\ProgramData\Chocolatey\bin\ffprobe.exe"
 
 # Pfad zur prompts.json Datei
 PROMPTS_FILE = os.path.join(os.path.dirname(__file__), '..', 'config', 'prompts.json')

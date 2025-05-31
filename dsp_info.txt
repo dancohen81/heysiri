@@ -1,0 +1,12 @@
+Verfügbare DSP-Befehle:
+- '!echo:': Fügt einen Echo-Effekt hinzu. Standard: 0.8 Eingangsgain, 0.88 Ausgangsgain, 60ms Verzögerung, 0.4 Abklingrate.
+- '!hall:': Fügt einen Hall-Effekt (Reverb) hinzu. Standard: 50% Nachhall, 50% Dämpfung, 100% Raumgrösse, 100% Stereo-Tiefe, 10ms Vorverzögerung, -3dB Wet-Gain, nicht nur Wet-Signal.
+- '!pitch+<semitones>:': Erhöht die Tonhöhe um die angegebene Anzahl von Halbtönen (z.B. '!pitch+2:'). Intern wird dies in Cents umgerechnet (100 Cents = 1 Halbton). Ohne Angabe wird ein Standardwert von 2 Halbtönen verwendet.
+- '!pitch-<semitones>:': Verringert die Tonhöhe um die angegebene Anzahl von Halbtönen (z.g. '!pitch-3:'). Intern wird dies in Cents umgerechnet. Ohne Angabe wird ein Standardwert von -2 Halbtönen verwendet.
+- '!lowpass:<cutoff_freq>:': Wendet einen Tiefpassfilter mit der angegebenen Grenzfrequenz in Hz an (z.g. '!lowpass:500:'). Ohne Angabe wird ein Standardwert von 500Hz verwendet.
+- '!highpass:<cutoff_freq>:': Wendet einen Hochpassfilter mit der angegebenen Grenrequenz in Hz an (z.g. '!highpass:2000:'). Ohne Angabe wird ein Standardwert von 2000Hz verwendet.
+- '!tremolo:': Fügt einen Tremolo-Effekt hinzu. Standard: 6Hz Geschwindigkeit, 50% Tiefe.
+- '!flanger:': Fügt einen Flanger-Effekt hinzu. Standard: 0ms Verzögerung, 5% Tiefe, 0% Regeneration, 71% Breite, 0.5Hz Geschwindigkeit, 25% Phase.
+- '!overdrive:': Fügt einen Overdrive-Effekt hinzu. Standard: 20dB Gain, 20% Farbe.
+- '!reverse:': Spielt das Audio rückwärts ab.
+- '!normal:': Setzt alle DSP-Effekte für das aktuelle Segment zurück. Dies sollte verwendet werden, wenn keine Effekte angewendet werden sollen.

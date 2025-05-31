@@ -16,7 +16,7 @@ from pydub import AudioSegment # NEW: Import AudioSegment
 from src.config import (
     SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL,
     CHAT_AGENT_PROMPT, FILE_AGENT_PROMPT, INTERNET_AGENT_PROMPT, SYSTEM_PROMPT,
-    OPENROUTER_API_KEY, ACTIVE_LLM # NEU: OpenRouter Imports
+    OPENROUTER_API_KEY, ACTIVE_LLM, MAX_TOOL_RESULT_LENGTH # NEU: OpenRouter Imports, MAX_TOOL_RESULT_LENGTH
 )
 from src.chat_history import ChatHistory
 from src.api_clients import ClaudeAPI, ElevenLabsTTS, OpenRouterAPI # NEU: OpenRouterAPI
@@ -26,7 +26,7 @@ from src.session_manager import ChatSessionManager
 from src.audio_recorder import AudioRecorder
 from src.mcp_client import MCPManager
 from src.settings_window import SettingsWindow # NEU: Import SettingsWindow
-from src.dsp_processor import parse_dsp_commands, _apply_effects_to_segment # NEU: Import DSP functions
+from src.dsp_processor import parse_dsp_commands, _apply_effects_to_segment, clean_text_from_dsp_commands # NEU: Import DSP functions
 
 class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     """Hauptanwendung mit System Tray Integration"""
@@ -35,6 +35,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     status_update_signal = QtCore.pyqtSignal(str, str)
     chat_message_signal = QtCore.pyqtSignal(str, str, str) # role, content, message_id
     send_branch_heads_to_ui_signal = QtCore.pyqtSignal(dict) # New signal to send branch heads to the UI
+    refresh_chat_display_signal = QtCore.pyqtSignal() # NEW: Signal to refresh chat display
 
     def __init__(self, app):
         # Icons erstellen
@@ -43,6 +44,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         
         super().__init__(self.icon_idle)
         self.setToolTip("Voice Chat mit Claude")
+
+        # Keyboard state for F3 and F4
+        self.f3_pressed = False
+        self.f4_pressed = False
+        self.press_start_time = None # For F3 hold duration
+        self.feedback_given = False # For F3 hold feedback
 
         # APIs initialisieren
         self.init_apis()
@@ -57,29 +64,26 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         
         # Initialize ChatHistory and SessionManager first
         self.chat_history = ChatHistory("default")
+        self.window = StatusWindow() # Initialize window first
         self.session_manager = ChatSessionManager(
             self.chat_history, 
             self.llm_api, # Pass the active LLM API
-            None, # Pass None for window initially, set later
+            self.window, # Pass the window instance
             self.status_update_signal, 
-            self.chat_message_signal
+            self # Pass the VoiceChatApp instance itself
         )
 
         # UI Setup
-        self.window = StatusWindow()
-        # Now that session_manager is initialized, connect signals
         self.window.send_message_requested.connect(self.send_message_to_claude)
-        self.window.edit_message_requested.connect(self.session_manager.edit_chat_message_from_ui)
+        self.window.edit_message_requested.connect(self._on_edit_message_requested) # Connect to new handler
         self.window.show_branches_requested.connect(self._on_show_branches_requested)
         self.window.branch_selected_from_ui.connect(self._on_branch_selected_from_ui)
         self.window.show()
         
-        # Update session manager with the window instance
-        self.session_manager.window = self.window
-
         # Connect signals to StatusWindow slots (moved here to ensure window is fully set up)
         self.status_update_signal.connect(self.window.set_status)
-        self.chat_message_signal.connect(self.window.add_chat_message)
+        self.refresh_chat_display_signal.connect(self._refresh_chat_display) # NEW: Connect refresh signal
+        # self.chat_message_signal.connect(self.window.add_chat_message) # Removed, now handled by _refresh_chat_display
         self.send_branch_heads_to_ui_signal.connect(self.window.show_branch_selection_dialog)
         self.window.stop_requested.connect(self.stop_processing_from_ui)
         self.window.pause_audio_requested.connect(self.toggle_audio_playback)
@@ -90,6 +94,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.window.load_session_requested.connect(self.session_manager.load_chat_session)
         self.window.export_chat_requested.connect(self.session_manager.export_chat_history)
         self.window.clear_chat_requested.connect(self.session_manager.clear_current_chat_session)
+
+        # Connect new branch_icon_clicked signal from ChatDisplay
+        if self.window.chat_display:
+            self.window.chat_display.branch_icon_clicked.connect(self._on_branch_selected_from_ui)
 
         # Initialize AudioRecorder
         self.audio_recorder = AudioRecorder(self.window)
@@ -157,6 +165,26 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
 
         # Signals (moved here if they depend on fully initialized UI)
         self.activated.connect(self.tray_icon_clicked)
+
+    def keyPressEvent(self, event):
+        """Handles key press events for the main window."""
+        if event.key() == QtCore.Qt.Key_F3:
+            if not self.f3_pressed: # Only set start time on initial press
+                self.press_start_time = QtCore.QDateTime.currentMSecsSinceEpoch()
+            self.f3_pressed = True
+        elif event.key() == QtCore.Qt.Key_F4:
+            self.f4_pressed = True
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        """Handles key release events for the main window."""
+        if event.key() == QtCore.Qt.Key_F3:
+            self.f3_pressed = False
+            self.press_start_time = None # Reset on release
+            self.feedback_given = False # Reset on release
+        elif event.key() == QtCore.Qt.Key_F4:
+            self.f4_pressed = False
+        super().keyReleaseEvent(event)
 
     def create_icon(self, emoji, color):
         """Erstellt ein Icon mit Emoji"""
@@ -345,6 +373,15 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.menu.addSeparator()
         self.menu.addAction("⚙️ Einstellungen", self.open_settings_window) # NEU: Einstellungen-Menüpunkt
         self.menu.addSeparator()
+        # Font Size Submenu
+        font_size_menu = self.menu.addMenu("🔠 Schriftgrösse")
+        font_sizes = [8, 10, 12, 14, 16, 18, 20, 24, 28]
+        for size in font_sizes:
+            action = font_size_menu.addAction(f"{size} pt")
+            action.setData(size) # Store the font size in the action's data
+            action.triggered.connect(lambda checked, s=size: self._set_font_size(s)) # Use lambda to pass size
+        self.menu.addSeparator()
+
         self.menu.addAction("📝 System Prompt bearbeiten", self.edit_system_prompt)
         self.menu.addAction("Sound ElevenLabs Einstellungen", self.edit_elevenlabs_settings)
         self.menu.addSeparator()
@@ -354,6 +391,11 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         self.menu.aboutToShow.connect(self.update_tray_menu_status)
         
         self.setContextMenu(self.menu)
+
+    def _set_font_size(self, size):
+        """Sets the font size of relevant UI elements via the UI window."""
+        if self.window:
+            self.window.set_font_size(size)
 
     def update_tray_menu_status(self):
         """Aktualisiert MCP Status im Tray-Menü beim Öffnen"""
@@ -644,6 +686,31 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 except:
                     pass
 
+    def _refresh_chat_display(self):
+        """Refreshes the chat display with messages from the current active branch."""
+        print("DEBUG: _refresh_chat_display called.")
+        current_branch_messages = self.chat_history.get_current_branch_messages()
+        print(f"DEBUG: Messages to display: {len(current_branch_messages)}")
+        current_branch_head_id = self.chat_history.current_branch_head_id
+        all_messages_dict = self.chat_history.messages # Pass the full dictionary for branch point detection
+        font_size = self.window.current_font_size # Get current font size from UI
+        
+        self.window.chat_display.display_messages(current_branch_messages, current_branch_head_id, all_messages_dict, font_size)
+        print("DEBUG: chat_display.display_messages called.")
+
+    def _on_edit_message_requested(self, message_id: str, content: str):
+        """Handles the request to edit a message from the UI."""
+        # Store the ID of the message being edited
+        self.session_manager.editing_message_id = message_id
+        # Pre-fill input field with original message content (content is passed from UI)
+        # If content is empty, try to fetch from chat_history (fallback)
+        if not content:
+            message_obj = self.chat_history.messages.get(message_id)
+            if message_obj:
+                content = message_obj.get('content', '')
+        self.window.set_input_text(content)
+        self.status_update_signal.emit(f"Nachricht zur Bearbeitung geladen. Bearbeiten und erneut senden.", "yellow")
+
     def send_message_to_claude(self, user_text):
         """Sendet die Benutzer-Nachricht an Claude mit MCP Tool Support."""
         print(f"DEBUG: send_message_to_claude called with text: '{user_text}'")
@@ -668,7 +735,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 # Temporarily set current_branch_head_id to the parent of the original message
                 # so that add_message creates the new message as a sibling/new branch.
                 # Store the original current_branch_head_id to restore it later.
-                original_current_branch_head_id = self.chat_history.current_branch_head_id
+                # original_current_branch_head_id = self.chat_history.current_branch_head_id # Not needed if we always refresh
                 self.chat_history.current_branch_head_id = parent_for_new_branch
                 
                 message_id = self.chat_history.add_message("user", user_text)
@@ -685,15 +752,17 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.chat_history.current_branch_head_id = message_id
             
             self.session_manager.editing_message_id = None # Reset editing state
-            print("DEBUG: Lade Chat-Verlauf nach Bearbeitung neu.")
-            self.session_manager.load_existing_chat() # Reload chat to show the new branch
+            self.refresh_chat_display_signal.emit() # Refresh display after editing
             
         else:
             print("DEBUG: Neue Nachricht erkannt.")
             # Normal new message
             message_id = self.chat_history.add_message("user", user_text)
+            print(f"DEBUG: Message added to history with ID: {message_id}")
+            print(f"DEBUG: Current chat history message count: {self.chat_history.get_message_count()}")
             self.status_update_signal.emit("Nachricht gesendet.", "green")
-            self.chat_message_signal.emit("user", user_text, message_id) # Only emit for new messages
+            self.refresh_chat_display_signal.emit() # Refresh display after new message
+            print("DEBUG: refresh_chat_display_signal emitted.")
 
         if not self.llm_api:
             self.status_update_signal.emit("Kein LLM API verfügbar", "red")
@@ -848,16 +917,22 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 result = await self.mcp_manager.execute_tool(tool_name, tool_args)
                 
                 # Tool-Ergebnis für LLM formatieren (muss mit Claude's Tool-Result Format übereinstimmen)
+                result_str = str(result)
+                if len(result_str) > MAX_TOOL_RESULT_LENGTH:
+                    original_length = len(result_str)
+                    result_str = result_str[:MAX_TOOL_RESULT_LENGTH] + f"\n... (Ergebnis gekürzt von {original_length} auf {MAX_TOOL_RESULT_LENGTH} Zeichen)"
+                    print(f"DEBUG: Tool-Ergebnis für {tool_name} gekürzt. Original: {original_length}, Gekürzt: {len(result_str)}")
+
                 tool_result = {
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": tool_id,
-                        "content": str(result)
+                        "content": result_str
                     }]
                 }
                 tool_results.append(tool_result)
-                print(f"DEBUG: Tool-Ergebnis für {tool_name}: {result}")
+                print(f"DEBUG: Tool-Ergebnis für {tool_name}: {result_str[:100]}...") # Print only first 100 chars for debug
 
             if self.stop_flag.is_set():
                 print("DEBUG: Stop-Flag gesetzt nach Tool-Ausführung, beende.")
@@ -903,12 +978,13 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         """Verarbeitet LLM-Antwort (Text-Ausgabe + TTS)"""
         print(f"DEBUG: _handle_llm_response called with text: '{llm_text[:50]}...'")
         try:
+            self.window.grabKeyboard() # Ensure window has keyboard focus
             if self.stop_flag.is_set():
                 return
 
             # LLM-Antwort anzeigen und speichern
             message_id = self.chat_history.add_message("assistant", llm_text)
-            self.chat_message_signal.emit("assistant", llm_text, message_id)
+            self.refresh_chat_display_signal.emit() # Refresh display after assistant message
 
             # NEU: Titel generieren, wenn noch "default" und genug Nachrichten
             if self.session_manager.current_session_name == "default" and self.chat_history.get_message_count() >= 2:
@@ -949,14 +1025,17 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         audio_segment = AudioSegment.empty()
                         original_audio_duration_ms = 0 # Store original duration
 
-                        if segment_text.strip(): # Ensure segment_text is not just empty or whitespace
-                            self.status_update_signal.emit(f"🔊 Generiere Sprache für Segment: '{segment_text[:50]}...' ", "blue")
-                            audio_file_path_for_segment = self.tts.text_to_speech(segment_text)
+                        # Clean segment_text from DSP commands before sending to ElevenLabs
+                        cleaned_segment_text = clean_text_from_dsp_commands(segment_text)
+
+                        if cleaned_segment_text.strip(): # Ensure cleaned_segment_text is not just empty or whitespace
+                            self.status_update_signal.emit(f"🔊 Generiere Sprache für Segment: '{cleaned_segment_text[:50]}...' ", "blue")
+                            audio_file_path_for_segment = self.tts.text_to_speech(cleaned_segment_text) # Use cleaned text
                             if self.stop_flag.is_set(): return
                             audio_segment = AudioSegment.from_file(audio_file_path_for_segment)
                             original_audio_duration_ms = audio_segment.duration_seconds * 1000
                         else:
-                            print(f"DEBUG: Segment text is empty or only whitespace after command parsing. Skipping TTS for this segment.")
+                            print(f"DEBUG: Cleaned segment text is empty or only whitespace. Skipping TTS for this segment.")
                             continue # Skip TTS if there's no actual text to speak
                         
                         processed_segment = audio_segment # Default to original audio
@@ -964,9 +1043,9 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                         # Check if this segment has echo or reverb commands
                         has_time_domain_effect = any(cmd.startswith("!echo:") or cmd.startswith("!hall:") for cmd in segment_commands)
 
-                        if segment_commands:
-                            processed_segment = _apply_effects_to_segment(audio_segment, segment_commands)
-                            has_dsp_effects = True
+                        # if segment_commands: # Temporarily disable DSP effects for debugging
+                        #     processed_segment = _apply_effects_to_segment(audio_segment, segment_commands)
+                        #     has_dsp_effects = True
                         
                         # Now, handle trimming the echo tail if the next segment doesn't have a time-domain effect
                         if has_time_domain_effect:
@@ -1002,6 +1081,9 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                     
                     audio_to_play = temp_output_path
 
+                    print(f"DEBUG: Attempting to play audio from: {audio_to_play}")
+                    print(f"DEBUG: File exists before playback: {os.path.exists(audio_to_play)}")
+
                     if has_dsp_effects:
                         self.status_update_signal.emit("✅ DSP-Verarbeitung abgeschlossen.", "green")
 
@@ -1021,6 +1103,8 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         except Exception as e:
             self.window.disable_pause_button() # Ensure button is disabled on error
             self.status_update_signal.emit(f"Antwort-Verarbeitung Fehler: {e}", "red")
+        finally:
+            self.window.releaseKeyboard() # Explicitly release keyboard after processing
             
     def debug_llm_response(self, response, expected_tool_op, tools_available): # Umbenannt von debug_claude_response
         """Debug: Analysiert LLM Response"""
@@ -1060,8 +1144,7 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         """Slot to handle selection of a branch from the UI."""
         self.status_update_signal.emit(f"Wechsle zu Branch: {message_id[:8]}...", "blue")
         self.chat_history.set_current_branch(message_id) # Set the new branch head
-        self.window.clear_chat_display() # Clear current display
-        self.session_manager.load_existing_chat() # Reload chat for the new branch
+        self._refresh_chat_display() # Refresh display after branch change
         self.status_update_signal.emit("Branch gewechselt.", "green")
 
 
