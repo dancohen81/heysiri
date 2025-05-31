@@ -1,1 +1,0 @@
-Fehler: 401 Client Error: Unauthorized for url: https://api.elevenlabs.io/v1/text-to-speech/ZthjuvLPty3kTMaNKVKb gell das könnte mit fehlenden credits zu tun haben?
