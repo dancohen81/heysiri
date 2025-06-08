@@ -22,6 +22,7 @@ class MCPClient:
         self.pending_requests = {}
         self.tools = {}
         self.initialized = False
+        self.file_write_history = [] # Track file write operations
         
     async def start(self):
         """Startet den MCP Server Prozess"""
@@ -215,9 +216,30 @@ class MCPClient:
                 return response["result"]
             else:
                 error_msg = response.get("error", {}).get("message", "Unbekannter Fehler") if response else "Keine Antwort"
-                return {"error": f"Tool-Ausführung fehlgeschlagen: {error_msg}"}
+                tool_result = {"error": f"Tool-Ausführung fehlgeschlagen: {error_msg}"}
+            
+            # Track file write operations
+            file_write_tools = ["write_to_file", "apply_diff", "insert_content", "search_and_replace"]
+            if tool_name in file_write_tools:
+                self.file_write_history.append({
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "success": "error" not in tool_result,
+                    "result": tool_result
+                })
+            
+            return tool_result
                 
         except Exception as e:
+            # Track file write operations even if an exception occurs
+            file_write_tools = ["write_to_file", "apply_diff", "insert_content", "search_and_replace"]
+            if tool_name in file_write_tools:
+                self.file_write_history.append({
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "success": False,
+                    "result": {"error": str(e)}
+                })
             return {"error": f"Fehler bei Tool-Ausführung: {e}"}
     
     def get_tools_for_claude(self) -> list:
@@ -243,6 +265,10 @@ class MCPClient:
             claude_tools.append(claude_tool)
             
         return claude_tools
+        
+    def get_file_write_history(self) -> list:
+        """Gibt die Historie der Dateischreiboperationen zurück"""
+        return self.file_write_history
     
     def is_ready(self) -> bool:
         """Prüft ob MCP Client bereit ist"""

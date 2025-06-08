@@ -12,6 +12,7 @@ import sys
 import requests
 import uuid # NEW: Import uuid for unique filenames
 from pydub import AudioSegment # NEW: Import AudioSegment
+from typing import Optional # Import Optional for type hinting
 
 from src.config import (
     SAMPLERATE, AUDIO_FILENAME, CLAUDE_API_KEY, ELEVENLABS_API_KEY, FILEMAN_MCP_URL,
@@ -27,6 +28,7 @@ from src.audio_recorder import AudioRecorder
 from src.mcp_client import MCPManager
 from src.settings_window import SettingsWindow # NEU: Import SettingsWindow
 from src.dsp_processor import parse_dsp_commands, _apply_effects_to_segment, clean_text_from_dsp_commands # NEU: Import DSP functions
+import re # Import regex module
 
 class VoiceChatApp(QtWidgets.QSystemTrayIcon):
     """Hauptanwendung mit System Tray Integration"""
@@ -71,6 +73,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
             self.status_update_signal, 
             self # Pass the VoiceChatApp instance itself
         )
+
+        # Load addresses from addresses.txt
+        self.addresses = self.load_addresses("addresses.txt")
+        print(f"Loaded addresses: {self.addresses}")
 
         # UI Setup
         self.window.send_message_requested.connect(self.send_message_to_claude)
@@ -316,9 +322,10 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         return any(keyword in user_lower for keyword in file_keywords)
 
     def detect_internet_operation(self, user_input):
-        """Erkennt ob eine Internet-Operation angefragt wird"""
+        """Erkennt ob eine Internet- oder E-Mail-Operation angefragt wird"""
         internet_keywords = [
-            'hole inhalt', 'fetch', 'webseite', 'url', 'internet', 'surfe', 'besuche'
+            'hole inhalt', 'fetch', 'webseite', 'url', 'internet', 'surfe', 'besuche',
+            'sende email', 'schreibe email', 'email senden', 'mail senden', 'e-mail'
         ]
         user_lower = user_input.lower()
         return any(keyword in user_lower for keyword in internet_keywords)
@@ -707,6 +714,12 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
         """Sendet die Benutzer-Nachricht an Claude mit MCP Tool Support."""
         print(f"DEBUG: send_message_to_claude called with text: '{user_text}'")
         self.stop_flag.clear()
+
+        # Check for the specific instruction trigger
+        if user_text.strip().lower() == "read email address":
+            user_text = "Bitte lies die E-Mail-Adresse für Stefan Klitt aus der Datei addresses.txt."
+            self.status_update_signal.emit("Spezialanweisung an Claude gesendet.", "blue")
+        
         if not user_text.strip():
             self.status_update_signal.emit("Nachricht ist leer, wird nicht gesendet.", "yellow")
             self.window.enable_send_button()
@@ -905,6 +918,31 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.status_update_signal.emit(f"🛠️ Verwende Tool: {tool_name}", "blue")
                 print(f"DEBUG: Ausführen von Tool: {tool_name} mit Argumenten: {tool_args}")
                 
+                # NEU: Pre-processing für addresses.txt Pfad
+                if tool_name == "read_file" and tool_args.get("path") == "addresses.txt":
+                    tool_args["path"] = "D:/Users/stefa/heysiri/addresses.txt"
+                    print(f"DEBUG: read_file Pfad für addresses.txt korrigiert zu: {tool_args['path']}")
+
+                # NEU: Rechtschreibprüfung für E-Mail-Adressen
+                if tool_name == "send_email":
+                    original_recipient = tool_args.get("to")
+                    if original_recipient:
+                        # Try to extract a name from the recipient string
+                        # This regex tries to capture the part before '@' or the whole string if no '@'
+                        match = re.match(r"([^@]+)(?:@.*)?", original_recipient)
+                        potential_name = match.group(1) if match else original_recipient
+                        
+                        print(f"DEBUG: Original Empfänger: '{original_recipient}', Potenzieller Name: '{potential_name}'")
+
+                        corrected_email = self.find_email_by_name(potential_name)
+                        if corrected_email:
+                            print(f"DEBUG: Korrigiere E-Mail-Adresse von '{original_recipient}' zu '{corrected_email}' aus addresses.txt")
+                            tool_args["to"] = corrected_email
+                            self.status_update_signal.emit(f"E-Mail-Adresse korrigiert: {original_recipient} -> {corrected_email}", "green")
+                        else:
+                            print(f"DEBUG: Keine Korrektur für E-Mail-Adresse '{original_recipient}' (Name: '{potential_name}') in addresses.txt gefunden.")
+                            self.status_update_signal.emit(f"Keine E-Mail-Adresse für '{original_recipient}' in addresses.txt gefunden. Sende an die vom LLM vorgeschlagene Adresse.", "yellow")
+
                 # Tool über MCP ausführen
                 result = await self.mcp_manager.execute_tool(tool_name, tool_args)
                 
@@ -1132,6 +1170,55 @@ class VoiceChatApp(QtWidgets.QSystemTrayIcon):
                 self.status_update_signal.emit("⏸️ Audio pausiert.", "yellow")
         else:
             self.status_update_signal.emit("Kein Audio zum Pausieren/Fortsetzen.", "yellow")
+
+    def load_addresses(self, filename: str) -> dict:
+        """Loads email addresses from a text file."""
+        addresses = {}
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split(':', 1)
+                        if len(parts) == 2:
+                            name = parts[0].strip()
+                            email = parts[1].strip()
+                            addresses[name.lower()] = email # Store name in lowercase for case-insensitive lookup
+                            # Also store parts of the name for partial matching
+                            name_parts = name.lower().split()
+                            for part in name_parts:
+                                if part not in addresses: # Avoid overwriting full name
+                                    addresses[part] = email
+        except FileNotFoundError:
+            print(f"Warning: Address file '{filename}' not found.")
+        except Exception as e:
+            print(f"Error loading addresses from '{filename}': {e}")
+        return addresses
+
+    def find_email_by_name(self, name_query: str) -> Optional[str]:
+        """
+        Finds an email address in the loaded addresses based on a name query.
+        Performs a case-insensitive search.
+        """
+        name_query_lower = name_query.lower()
+        
+        # 1. Check for exact name match (case-insensitive)
+        if name_query_lower in self.addresses:
+            return self.addresses[name_query_lower]
+        
+        # 2. Check if the query itself is a valid email address present in our values
+        # This handles cases where the LLM might provide an email directly,
+        # but we still want to ensure it's a known contact.
+        for email in self.addresses.values():
+            if name_query_lower == email.lower():
+                return email # Return the original cased email from addresses.txt
+        
+        # 3. Check for partial name match (e.g., "Sklit" for "Stefan Klitt")
+        for name, email in self.addresses.items():
+            if name_query_lower in name:
+                return email
+        
+        return None
 
     def force_file_operation_prompt(self, operation_type, details):
         """Erstellt einen zwingenden Prompt für Dateisystem-Operationen"""
