@@ -25,19 +25,23 @@ Thumbs.db
 *.tmp
 *~
 
-# Specific to this project
+# Project-specific ignored files and directories
 *.mp3 # Wildcard for all mp3 files
 claude_response*.mp3 # Wildcard for generated audio files
 temp_aufnahme.wav
+temp_audio/ # Directory for temporary audio files
 .env
 voice-chat-project/
 chat_history.json
 chat_history_*.json
 starts.txt
 test*.txt
-
-# Specific to this project
 files/
+uv.lock
+
+# Build artifacts
+dist/
+build/
 
 # Node modules
 node_modules/
